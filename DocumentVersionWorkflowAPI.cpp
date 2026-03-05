@@ -15,6 +15,7 @@
 #include <sstream>   // std::istringstream, std::ostringstream 사용을 위해
 #include <numeric>   // std::accumulate 사용을 위해 (해시 등)
 #include <functional> // std::hash 사용을 위해
+#include <unordered_set> // 03/05 - 삭제 대상 중복 체크 O(1)을 위해
 
 // 데이터 구조체 정의
 
@@ -237,6 +238,15 @@ private:
     PolicyManager* policyManager = nullptr;
     FileStorage* fileStorage = nullptr;
     DatabaseConnection* db = nullptr;
+
+    // 03/05 - 태그 이름 상수 정의 (하드코딩 방지)
+    // setDocumentStatus, processApprovalWorkflow 등에서 공통 사용
+    // 태그 이름 변경 시 이곳만 수정하면 전체 반영
+    static constexpr const char* TAG_DRAFT = "draft";
+    static constexpr const char* TAG_UNDER_REVIEW = "under_review";
+    static constexpr const char* TAG_APPROVED = "approved";
+    static constexpr const char* TAG_REJECTED = "rejected";
+    static constexpr const char* TAG_DEPRECATED = "deprecated";
 
 public:
     // RD-SRS-9.1: 모든 문서는 고유한 버전 번호를 가져야 함
@@ -587,19 +597,31 @@ public:
                         DocumentStatus status,
                         const std::string& comment = "") {
         // 1. 상태를 태그 이름으로 매핑
+        // 03/05 - 하드코딩된 문자열을 클래스 상수로 교체
         std::string tagName;
         switch (status) {
-            case DocumentStatus::DRAFT: tagName = "draft"; break;
-            case DocumentStatus::UNDER_REVIEW: tagName = "under_review"; break;
-            case DocumentStatus::APPROVED: tagName = "approved"; break;
-            case DocumentStatus::REJECTED: tagName = "rejected"; break;
-            case DocumentStatus::DEPRECATED: tagName = "deprecated"; break;
+            case DocumentStatus::DRAFT: tagName = TAG_DRAFT; break;
+            case DocumentStatus::UNDER_REVIEW: tagName = TAG_UNDER_REVIEW; break;
+            case DocumentStatus::APPROVED: tagName = TAG_APPROVED; break;
+            case DocumentStatus::REJECTED: tagName = TAG_REJECTED; break;
+            case DocumentStatus::DEPRECATED: tagName = TAG_DEPRECATED; break;
             // 02/10 - default case 추가 - 잘못된 enum 값 방어를 위함
             default:
                 throw std::invalid_argument("Unknown DocumentStatus: " + std::to_string(static_cast<int>(status)));
         }
 
-        // 2. 태그가 존재하는지 확인, 없으면 생성 (maps to ISystemTagManager::createTag)
+        // 2. 상태 전이 유효성 검사
+        // 03/05 - DLP 보안: 허용되지 않은 상태 전이를 차단
+        // ※ 전이 규칙은 초기 버전이며, 설계 단계에서 재검토 예정 (isValidTransition 주석 참조)
+        std::string currentTag = getCurrentStatusTag(fileId);
+        if (!isValidTransition(currentTag, tagName)) {
+            std::string currentDisplay = currentTag.empty() ? "(none)" : currentTag;
+            auditLog->logActivity(userId, fileId, "status_change_denied",
+                                "Invalid transition: " + currentDisplay + " -> " + tagName);
+            return false;
+        }
+
+        // 3. 태그가 존재하는지 확인, 없으면 생성 (maps to ISystemTagManager::createTag)
         auto tagResult = db->query("SELECT id FROM systemtag WHERE name = ?", {tagName});
         std::string tagId;
 
@@ -612,8 +634,8 @@ public:
             tagId = tagResult[0]["id"];
         }
 
-        // 3. 기존 상태 태그 제거 (한 파일은 하나의 상태만 가질 수 있도록)
-        std::vector<std::string> statusTags = {"draft", "under_review", "approved", "rejected", "deprecated"};
+        // 4. 기존 상태 태그 제거 (한 파일은 하나의 상태만 가질 수 있도록)
+        std::vector<std::string> statusTags = {TAG_DRAFT, TAG_UNDER_REVIEW, TAG_APPROVED, TAG_REJECTED, TAG_DEPRECATED};
         for (const auto& oldTag : statusTags) {
             if (oldTag != tagName) {
                 db->execute("DELETE FROM systemtag_object_mapping "
@@ -623,15 +645,15 @@ public:
             }
         }
 
-        // 4. 새 상태 태그 할당 (maps to ISystemTagObjectMapper::assignTags)
+        // 5. 새 상태 태그 할당 (maps to ISystemTagObjectMapper::assignTags)
         db->execute("INSERT OR REPLACE INTO systemtag_object_mapping "
                     "(objectid, objecttype, systemtagid) "
                     "VALUES (?, 'files', ?)", {fileId, tagId});
 
-        // 5. 상태 변경 이력 기록
+        // 6. 상태 변경 이력 기록
         logDocumentChangeHistory(userId, fileId, "status_changed", "Changed to " + tagName + ": " + comment);
 
-        // 6. 워크플로우 트리거 (maps to WorkflowEngine check)
+        // 7. 워크플로우 트리거 (maps to WorkflowEngine check)
         // 태그 변경이 워크플로우 조건으로 사용될 수 있음
         workflowEngine->evaluateRules("tag_assigned", {
             {"fileId", fileId},
@@ -639,7 +661,7 @@ public:
             {"userId", userId}
         });
 
-        // 7. 알림 발송 (상태 변경 알림)
+        // 8. 알림 발송 (상태 변경 알림)
         if (status == DocumentStatus::APPROVED || status == DocumentStatus::DEPRECATED) {
             notificationService->notifyFileSubscribers(fileId,
                 "Document status changed to " + tagName, userId);
@@ -662,15 +684,39 @@ public:
 
         switch (action) {
             case ApprovalAction::REQUEST: {
+                // 03/05 - 선행 검증 1: 빈 승인자 목록 방어
+                // 승인자가 없으면 누구도 APPROVE/REJECT할 수 없어 문서가 UNDER_REVIEW에 영구 체류
+                if (approvers.empty()) {
+                    auditLog->logActivity(userId, fileId, "approval_failed",
+                                        "No approvers specified for approval request");
+                    break;  // success = false 유지
+                }
+
+                // 03/05 - 선행 검증 2: 태그 기반 중복 승인 요청 방어 (Nextcloud 방식)
+                // pending 태그(under_review)가 이미 할당되어 있으면 승인 대기 중이므로 중복 요청 거부
+                // systemtag_object_mapping이 Single Source of Truth (setDocumentStatus가 관리)
+                auto pendingCheck = db->query(
+                    "SELECT systemtagid FROM systemtag_object_mapping "
+                    "WHERE objectid = ? AND objecttype = 'files' "
+                    "AND systemtagid IN (SELECT id FROM systemtag WHERE name = ?)",
+                    {fileId, TAG_UNDER_REVIEW}
+                );
+                if (!pendingCheck.empty()) {
+                    auditLog->logActivity(userId, fileId, "approval_failed",
+                                        "Approval already pending for this file");
+                    break;  // success = false 유지
+                }
+
                 // 1. pending 태그 할당 (승인 요청 시작)
                 setDocumentStatus(userId, fileId, DocumentStatus::UNDER_REVIEW,
                                 "Approval requested: " + comment);
 
                 // 2. 승인 규칙 생성/확인 (maps to RuleService::createRule)
                 // 02/10 - file_id를 규칙에 연결하여 파일별 승인 관리
+                // 03/05 - 태그 이름을 클래스 상수로 파라미터화
                 std::string ruleId = generateUUID();
                 db->execute("INSERT INTO approval_rules (id, file_id, tag_pending, tag_approved, tag_rejected) "
-                            "VALUES (?, ?, 'under_review', 'approved', 'rejected')", {ruleId, fileId});
+                            "VALUES (?, ?, ?, ?, ?)", {ruleId, fileId, TAG_UNDER_REVIEW, TAG_APPROVED, TAG_REJECTED});
 
                 // 3. 요청자 등록 (maps to approval_rule_requesters)
                 db->execute("INSERT INTO approval_rule_requesters (rule_id, entity_type, entity_id) "
@@ -694,11 +740,12 @@ public:
 
             case ApprovalAction::APPROVE: {
                 // 1. 승인 권한 확인
+                // 03/05 - 태그 이름을 클래스 상수로 파라미터화
                 auto approverCheck = db->query(
                     "SELECT rule_id FROM approval_rule_approvers "
                     "WHERE entity_id = ? AND rule_id IN "
-                    "(SELECT id FROM approval_rules WHERE tag_pending = 'under_review' AND file_id = ?)",
-                    {userId, fileId}
+                    "(SELECT id FROM approval_rules WHERE tag_pending = ? AND file_id = ?)",
+                    {userId, TAG_UNDER_REVIEW, fileId}
                 );
 
                 if (!approverCheck.empty()) {
@@ -709,8 +756,8 @@ public:
                     // 3. 승인 액션 기록 (maps to RuleService::storeAction)
                     // 02/10 - 초 단위로 통일
                     db->execute("INSERT INTO approval_activity (rule_id, user_id, action, "
-                                "timestamp, comment) VALUES (?, ?, 'approved', ?, ?)",
-                                {approverCheck[0]["rule_id"], userId, 
+                                "timestamp, comment) VALUES (?, ?, ?, ?, ?)",
+                                {approverCheck[0]["rule_id"], userId, TAG_APPROVED,
                                 std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
                                     std::chrono::system_clock::now().time_since_epoch()).count()),  
                                 comment});
@@ -738,11 +785,12 @@ public:
             case ApprovalAction::REJECT: {
                 // 승인과 유사하지만 rejected 태그 사용
                 // 02/10 - case: APPROVE와 동일한 수준의 권한 검증 (file_id + tag_pending 조건)
+                // 03/05 - 태그 이름을 클래스 상수로 파라미터화
                 auto approverCheck = db->query(
                     "SELECT rule_id FROM approval_rule_approvers "
                     "WHERE entity_id = ? AND rule_id IN "
-                    "(SELECT id FROM approval_rules WHERE tag_pending = 'under_review' AND file_id = ?)", 
-                    {userId, fileId}
+                    "(SELECT id FROM approval_rules WHERE tag_pending = ? AND file_id = ?)", 
+                    {userId, TAG_UNDER_REVIEW, fileId}
                 );
 
                 if (!approverCheck.empty()) {
@@ -752,8 +800,8 @@ public:
 
                     // 거부 액션 기록
                     db->execute("INSERT INTO approval_activity (rule_id, user_id, action, "
-                                "timestamp, comment) VALUES (?, ?, 'rejected', ?, ?)",
-                                {approverCheck[0]["rule_id"], userId, 
+                                "timestamp, comment) VALUES (?, ?, ?, ?, ?)",
+                                {approverCheck[0]["rule_id"], userId, TAG_REJECTED,
                                 std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
                                     std::chrono::system_clock::now().time_since_epoch()).count()), 
                                 comment});
@@ -772,6 +820,10 @@ public:
                 }
                 break;
             }
+
+            // 03/05 - default case 추가 (setDocumentStatus와 동일한 방어 패턴)
+            default:
+                throw std::invalid_argument("Unknown ApprovalAction: " + std::to_string(static_cast<int>(action)));
         }
 
         return success;
@@ -875,17 +927,16 @@ public:
                                 "WHERE file_id = ? ORDER BY timestamp DESC", {fileId});
 
         // 3. 보존할 버전과 삭제할 버전 결정 (maps to Expiration::getExpireList)
-        std::vector<std::string> toDelete;
+        // 03/05 - vector → unordered_set: 할당량 정리 시 중복 체크를 O(1)로 개선
+        std::unordered_set<std::string> toDeleteSet;
         // 02/10 - 초 단위로 통일
         auto now = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()
         ).count();
 
         // 계층적 보존 전략 구현
-        // (2초 → 10초 → 분 → 시간 → 일 → 주)
-        std::vector<int64_t> retentionIntervals = {
-            2, 10, 60, 3600, 86400, 604800  // 초 단위
-        };
+        // 03/05 - 버전 나이 기반 간격 선택으로 수정 (기존: 작은 interval부터 순회하여 계층 무력화)
+        // 나이별 적용 간격은 getRequiredInterval() 참조
 
         int versionCount = 0;
         int64_t lastKeptTimestamp = 0;
@@ -903,38 +954,35 @@ public:
 
             // 최대 버전 수 체크
             if (policy.maxVersions > 0 && versionCount > policy.maxVersions) {
-                toDelete.push_back(version.at("file_id") + ".v" + version.at("timestamp"));
+                toDeleteSet.insert(version.at("file_id") + ".v" + version.at("timestamp"));
                 continue;
             }
 
             // 최대 보관 기간 체크
             // 02/10 - 초 단위 통일 - 86400초 = 1일
-            if (policy.maxDays > 0 && versionAge > (int64_t)policy.maxDays * 86400) { // 단위 조정 가정
-                toDelete.push_back(version.at("file_id") + ".v" + version.at("timestamp"));
+            if (policy.maxDays > 0 && versionAge > (int64_t)policy.maxDays * 86400) {
+                toDeleteSet.insert(version.at("file_id") + ".v" + version.at("timestamp"));
                 continue;
             }
 
             // 최소 보관 기간 내의 버전은 보존
             // 02/10 - 초 단위 통일
-            if (policy.minDays > 0 && versionAge < (int64_t)policy.minDays * 86400) { // 단위 조정 가정
+            if (policy.minDays > 0 && versionAge < (int64_t)policy.minDays * 86400) {
                 lastKeptTimestamp = vTimestamp;
                 continue;
             }
 
             // 계층적 간격 체크
-            bool shouldKeep = false;
-            for (const auto& interval : retentionIntervals) {
-                // interval * 1000000은 마이크로초 단위 가정을 유지
-                // 02/10 - 초 단위 통일
-                if (lastKeptTimestamp - vTimestamp >= interval) {
-                    shouldKeep = true;
-                    lastKeptTimestamp = vTimestamp;
-                    break;
-                }
-            }
+            // 03/05 - 버전 나이에 따라 적절한 간격을 선택하여 비교
+            // (기존: retentionIntervals를 작은 값부터 순회 → 2초 조건에서 항상 통과하는 버그)
+            int64_t requiredInterval = getRequiredInterval(versionAge);
 
-            if (!shouldKeep && policy.autoCleanup) {
-                toDelete.push_back(version.at("file_id") + ".v" + version.at("timestamp"));
+            if (lastKeptTimestamp - vTimestamp >= requiredInterval) {
+                // 마지막 보존 버전과 충분한 간격 → 보존
+                lastKeptTimestamp = vTimestamp;
+            } else if (policy.autoCleanup) {
+                // 간격 부족 → 삭제 대상
+                toDeleteSet.insert(version.at("file_id") + ".v" + version.at("timestamp"));
             }
         }
 
@@ -946,36 +994,24 @@ public:
             }
 
             size_t quotaLimit = getQuotaLimit();
-            // 02/10 - 음... 일단 낼 물어보자...
             if (totalSize > quotaLimit) {
                 // 02/10 - size_t underflow 방지: 3개 미만이면 정리 대상 없음
                 if (versions.size() >= 3) {
                     // int 캐스팅으로 unsigned underflow 방지
                     for (int i = static_cast<int>(versions.size()) - 1; i >= 2 && totalSize > quotaLimit; i--) {
                         auto versionId = versions[i].at("file_id") + ".v" + versions[i].at("timestamp");
-                        if (std::find(toDelete.begin(), toDelete.end(), versionId) == toDelete.end()) {
-                            toDelete.push_back(versionId);
+                        // 03/05 - unordered_set::find로 중복 체크 O(1) (기존: std::find O(n))
+                        if (toDeleteSet.find(versionId) == toDeleteSet.end()) {
+                            toDeleteSet.insert(versionId);
                             totalSize -= std::stoull(versions[i].at("size"));
                         }
                     } // end for
                 } // end of versionsSize >= 3 check
-            } // end policy.autoCleanup
-
-            // 기존의 방식
-            // if (totalSize > quotaLimit) {
-            //     // 오래된 버전부터 추가로 삭제 (최근 2개는 제외)
-            //     for (size_t i = versions.size() - 1; i >= 2 && totalSize > quotaLimit; i--) {
-            //         auto versionId = versions[i].at("file_id") + ".v" + versions[i].at("timestamp");
-            //         if (std::find(toDelete.begin(), toDelete.end(), versionId) == toDelete.end()) {
-            //             toDelete.push_back(versionId);
-            //             totalSize -= std::stoull(versions[i].at("size"));
-            //         }
-            //     }
-            // }
+            }
         }
 
         // 5. 버전 삭제 실행 (maps to Storage::expire)
-        for (const auto& versionId : toDelete) {
+        for (const auto& versionId : toDeleteSet) {
             // 파일 시스템에서 삭제
             fileStorage->deleteFile("files_versions/" + versionId);
 
@@ -1018,6 +1054,62 @@ private:
         return "";
     }
 
+    // 03/05 - 파일의 현재 문서 상태를 태그 기반으로 조회
+    // 반환: 현재 상태 태그 이름 (예: "draft", "approved")
+    //       태그가 없으면 빈 문자열 (새 파일이거나 상태 미지정)
+    std::string getCurrentStatusTag(const std::string& fileId) {
+        std::vector<std::string> statusTags = {TAG_DRAFT, TAG_UNDER_REVIEW, TAG_APPROVED, TAG_REJECTED, TAG_DEPRECATED};
+        for (const auto& tag : statusTags) {
+            auto result = db->query(
+                "SELECT systemtagid FROM systemtag_object_mapping "
+                "WHERE objectid = ? AND objecttype = 'files' "
+                "AND systemtagid IN (SELECT id FROM systemtag WHERE name = ?)",
+                {fileId, tag}
+            );
+            if (!result.empty()) {
+                return tag;
+            }
+        }
+        return "";  // 상태 없음 (새 파일)
+    }
+
+    // 03/05 - 상태 전이 유효성 검사
+    // DLP 보안 정책: 허용되지 않은 상태 전이를 API 레벨에서 차단
+    //
+    // ※ 주의: 현재 전이 규칙은 확정되지 않은 초기 버전입니다.
+    //   - 설계 단계(4~6월)에서 실제 비즈니스 요구사항에 맞춰 재검토 예정
+    //   - 라이브러리로 제공 시, 도입 기업이 커스터마이징할 수 있는
+    //     설정 인터페이스(전이 매트릭스 오버라이드) 추가를 고려 중
+    //   - 특히 DEPRECATED의 최종 상태 여부, APPROVED→DRAFT 허용 여부 등은
+    //     도입 기업의 보안 정책에 따라 달라질 수 있음
+    //
+    // 현재 기본 전이 규칙:
+    //   (없음)       → DRAFT, UNDER_REVIEW       새 파일 최초 상태 설정
+    //   DRAFT        → UNDER_REVIEW, DEPRECATED   검토 요청 또는 폐기
+    //   UNDER_REVIEW → APPROVED, REJECTED          승인자만 결정
+    //   APPROVED     → DEPRECATED                  승인 후 폐기만 가능
+    //   REJECTED     → DRAFT                       수정 후 재제출만 가능
+    //   DEPRECATED   → (전이 불가)                 최종 상태
+    bool isValidTransition(const std::string& currentTag, const std::string& newTag) {
+        // 전이 매트릭스: {현재 상태, {허용되는 다음 상태들}}
+        static const std::map<std::string, std::vector<std::string>> transitionMatrix = {
+            {"",                {TAG_DRAFT, TAG_UNDER_REVIEW}},                 // 새 파일
+            {TAG_DRAFT,         {TAG_UNDER_REVIEW, TAG_DEPRECATED}},            // 초안
+            {TAG_UNDER_REVIEW,  {TAG_APPROVED, TAG_REJECTED}},                  // 검토중
+            {TAG_APPROVED,      {TAG_DEPRECATED}},                              // 승인됨
+            {TAG_REJECTED,      {TAG_DRAFT}},                                   // 거절됨
+            {TAG_DEPRECATED,    {}},                                            // 폐기 (최종)
+        };
+
+        auto it = transitionMatrix.find(currentTag);
+        if (it == transitionMatrix.end()) {
+            return false;  // 알 수 없는 현재 상태
+        }
+
+        const auto& allowed = it->second;
+        return std::find(allowed.begin(), allowed.end(), newTag) != allowed.end();
+    }
+
     bool isAdminAuditEnabled() {
         // Admin Audit 활성화 여부 확인
         return true;  // 간단히 true 반환
@@ -1046,6 +1138,32 @@ private:
     size_t getQuotaLimit() {
         // 사용자 할당량 조회
         return 10ULL * 1024 * 1024 * 1024;  // 예: 10GB (ULL 접미사로 오버플로우 방지)
+    }
+
+    // 03/05 - 버전 나이에 따른 계층적 보존 간격 결정
+    // Nextcloud 보존 전략: 오래된 버전일수록 넓은 간격으로 솎아냄
+    // 매개변수: versionAge - 현재 시각 기준 버전의 나이 (초)
+    // 반환값: 해당 나이 구간에서 보존 간격으로 사용할 값 (초)
+    int64_t getRequiredInterval(int64_t versionAge) {
+        // {나이 임계값, 해당 구간의 보존 간격}
+        // 예: 나이 < 10초 → 2초 간격으로 보존 (촘촘히)
+        //     나이 < 60초 → 10초 간격으로 보존 (조금 솎아냄)
+        //     ...
+        //     나이 >= 1주  → 1주 간격으로 보존 (최소만)
+        static const std::vector<std::pair<int64_t, int64_t>> tiers = {
+            {10,     2},        // 10초 미만  → 2초 간격
+            {60,     10},       // 1분 미만   → 10초 간격
+            {3600,   60},       // 1시간 미만 → 1분 간격
+            {86400,  3600},     // 1일 미만   → 1시간 간격
+            {604800, 86400},    // 1주 미만   → 1일 간격
+        };
+
+        for (const auto& [threshold, interval] : tiers) {
+            if (versionAge < threshold) {
+                return interval;
+            }
+        }
+        return 604800;  // 1주 이상 → 1주 간격
     }
 
     std::map<std::string, std::string> parseJson(const std::string& json) {
