@@ -58,54 +58,12 @@ struct ActivityEntry {
     std::optional<std::string> reason;  // 변경 이유 (커스텀 필드)
 };
 
-// ==========================================
-// 02/11 - DiffService 관련 구조체 새로 정의
-// ==========================================
 
-// 개별 변경 줄의 유형
-// GitHub diff 뷰에서 녹색(+), 빨간색(-), 회색(변경 없음)에 대응
-enum class DiffLineType {
-    ADDED,      // 새로 추가된 줄 (GitHub의 녹색 "+")
-    DELETED,    // 삭제된 줄 (GitHub의 빨간색 "-")
-    UNCHANGED   // 변경 없는 줄 (컨텍스트 표시용)
-};
-
-// 개별 변경 줄 정보
-// diff 결과의 최소 단위로, 하나의 줄이 추가/삭제/유지 중 어떤 상태인지를 나타냄
-struct DiffLine {
-    DiffLineType type;  // 변경 유형
-    // 03/13 - int(-1) → std::optional<int> 전환
-    // 이유: -1은 "해당 없음"이라는 의미인데 int 타입에서는 유효한 값과 구분 불명확
-    //       optional은 값이 없음(nullopt)을 타입 시스템으로 표현
-    //       이미 <optional>을 include하고 있으므로 추가 의존성 없음
-    std::optional<int> oldLineNumber;  // 원본에서의 줄 번호 (nullopt이면 해당 없음, 즉 ADDED)
-    std::optional<int> newLineNumber;  // 수정본에서의 줄 번호 (nullopt이면 해당 없음, 즉 DELETED)
-    std::string content;    // 줄 내용
-};
-
-// 변경 블록 (hunk)
-// GitHub diff에서 "@@ -3, 7 + 3, 8 @@"로 표시되는 하나의 변경 영역에 해당
-// 연속된 변경 줄들과 그 전후 컨텍스트(기본 3줄)를 하나의 hunk로 묶는다
-struct DiffHunk {
-    int oldStart;                   // 원본 시작 줄 번호
-    int oldCount;                   // 원본에서 이 hunk가 포함하는 줄 수
-    int newStart;                   // 수정본 시작 줄 번호
-    int newCount;                   // 수정본에서 이 hunk가 포함하는 줄 수
-    std::vector<DiffLine> lines;    // 이 블록에 포함된 모든 줄 (ADDED + DELETED + UNCHANGED)
-};
-
-// 전체 비교 결과
-// 하나의 비교 작업에 대한 모든 결과를 담는 최종 출력 구조체
-struct DiffResult {
-    bool isBinary = false;                  // 바이너리 파일 여부 (true면 해시 비교만 수행)
-    std::string oldHash;            // 원본 SHA-256 해시 (간이 해시)
-    std::string newHash;            // 수정본 SHA-256 해시 (간이 해시)
-    int addedLines = 0;                 // 추가된 줄 수 합계
-    int deletedLines = 0;               // 삭제된 줄 수 합계
-    std::vector<DiffHunk> hunks;    // 변경 블록 목록 (바이너리면 비어있음)
-    std::string unifiedDiff;        // GitHub 스타일 unified diff 전체 문자열
-    std::string summary;            // 로그용 요약 문자열
-};
+// 03/18 - DiffService 관련 코드를 헤더 파일로 분리
+// DiffLineType, DiffLine, DiffHunk, DiffMethod, DiffResult,
+// DocumentType, DocumentTextExtractor, DiffService 클래스가 포함됨
+// 주의: FileContent 구조체가 위에 정의된 후에 include해야 함
+#include "DiffService.h"
 
 // 버전 비교용 콘텐츠 쌍
 // 02/11 - DiffResult 필드 추가: 서버 측에서 계산된 diff 결과를 포함
@@ -116,7 +74,6 @@ struct DiffInfo {
     FileContent content2;   // 버전 2의 파일 콘텐츠
     DiffResult diffResult;  // 서버 측 diff 계산 결과
 };
-
 // 문서 상태
 enum class DocumentStatus {
     DRAFT,          // 초안
@@ -133,13 +90,10 @@ enum class ApprovalAction {
     REJECT          // 승인 거절
 };
 
-// 알림 수신자 정보
-struct NotificationTarget {
-    std::string userId;
-    std::vector<std::string> channels;  // 알림 채널 목록 ("push", "email", "web")
-};
-
-/* claude가 추천하는 열거형 구조체 / 타입 안정성
+// 03/18 - 알림 채널 enum 전환 (GPT 리뷰 반영)
+//   변경 전: std::vector<std::string> + "push"/"email"/"web" 문자열 비교
+//   문제: 오타를 컴파일러가 못 잡음, 타입 안정성 없음
+//   변경 후: enum class NotificationChannel + switch 분기
 enum class NotificationChannel {
     PUSH,
     EMAIL,
@@ -149,9 +103,7 @@ enum class NotificationChannel {
 struct NotificationTarget {
     std::string userId;
     std::vector<NotificationChannel> channels;
-}
-
-*/
+};
 
 // 버전 보존 정책 설정
 struct RetentionPolicy {
@@ -190,7 +142,7 @@ class NotificationService {
 public: 
     void notifyFileSubscribers(const std::string& f, const std::string& m, const std::string& u) {} 
     void sendNotification(const std::string& u, const std::string& s,
-                          const std::string& m, const std::vector<std::string>& c) {} 
+                          const std::string& m, const std::vector<NotificationChannel>& c) {} 
 };
 
 // 버전 보존 정책 적용
@@ -218,545 +170,6 @@ public:
                                                            const std::vector<std::string>& params) { return {}; }
 };
 
-// ============================================
-// DiffService 클래스
-// 02/11 - 구조체 정의
-// 03/05 - 전체 구현: Myers diff + SHA-256
-// 03/13 - 재통합 + prepareVersionComparison 연동 준비
-// ============================================
-// 두 파일 버전 간의 차이를 서버 측에서 계산하는 서비스
-// GitHub 스타일의 unified diff 형식으로 결과를 제공
-
-// 설계원칙:
-// - 텍스트 파일: Myers diff 기반 줄 단위 diff → 최단 편집 스크립트(SES) 제공
-//   (Git이 실제 사용하는 알고리즘, O(ND) 시간복잡도 - N: 전체 줄 수, D: 차이 수)
-// - 바이너리 파일: SHA-256 해시 비교 → 변경 여부만 판별
-// - 결과는 DiffResult 구조체로 반환, DB 저장 및 로그에 활용
-class DiffService {
-public:
-    // ==========================================
-    // computeDiff: 핵심 진입점 - 두 FileContent 간의 diff를 계산
-    // ==========================================
-    // 매개변수:
-    //  oldContent - 이전 버전의 파일 콘텐츠
-    //  newContent - 새 버전의 파일 콘텐츠
-    // 반환: DiffResult (바이너리면 해시만, 텍스트면 상세 diff 포함)
-    DiffResult computeDiff(const FileContent& oldContent, const FileContent& newContent) {
-        DiffResult result;
-
-        // 1. FNV-1a로 빠른 동일성 판별 (03/13 최적화)
-        // SHA-256 대비 수십 배 빠름 — 동일 파일이면 여기서 즉시 반환
-        std::string oldFnv = computeFNV1a(oldContent.data);
-        std::string newFnv = computeFNV1a(newContent.data);
-
-        if (oldFnv == newFnv) {
-            result.isBinary = false;
-            result.addedLines = 0;
-            result.deletedLines = 0;
-            result.oldHash = oldFnv;
-            result.newHash = newFnv;
-            result.summary = "No changes detected";
-            return result;
-        }
-
-        // 2. 바이너리 파일 체크
-        if (isBinaryContent(oldContent) || isBinaryContent(newContent)) {
-            result.isBinary = true;
-            result.addedLines = 0;
-            result.deletedLines = 0;
-            // 바이너리 파일은 SHA-256으로 의미 있는 해시 표시
-            // (DLP 무결성 검증과도 호환되는 암호학적 해시)
-            result.oldHash = computeSHA256(oldContent.data);
-            result.newHash = computeSHA256(newContent.data);
-            result.summary = "Binary files differ (SHA-256: " +
-                            result.oldHash.substr(0, 8) + "... -> " +
-                            result.newHash.substr(0, 8) + "...)";
-            return result;
-        }
-
-        // 3. 텍스트 diff 계산 — FNV-1a 해시 사용 (충분)
-        result.isBinary = false;
-        result.oldHash = oldFnv;
-        result.newHash = newFnv;
-        auto oldLines = splitLines(oldContent);
-        auto newLines = splitLines(newContent);
-
-        // 4. Myers diff 실행
-        auto diffLines = myersDiff(oldLines, newLines);
-
-        // 5. 통계 집계
-        result.addedLines = 0;
-        result.deletedLines = 0;
-        for (const auto& line : diffLines) {
-            if (line.type == DiffLineType::ADDED) result.addedLines++;
-            else if (line.type == DiffLineType::DELETED) result.deletedLines++;
-        }
-
-        // 6. Hunk 그룹핑 + 포맷팅
-        result.hunks = groupIntoHunks(diffLines);
-        result.unifiedDiff = formatUnifiedDiff(result.hunks);
-        result.summary = generateSummary(result);
-
-        return result;
-    }
-
-private:
-    // ==========================================
-    // isBinaryContent: 바이너리 파일 판별
-    // ==========================================
-    // Git과 동일한 방식: 앞 8KB에서 NULL 바이트(0x00) 탐지
-    // NULL이 하나라도 있으면 바이너리로 판단
-    bool isBinaryContent(const FileContent& content) {
-        size_t checkSize = std::min(content.data.size(), static_cast<size_t>(8192));
-        for (size_t i = 0; i < checkSize; i++) {
-            if (content.data[i] == 0x00) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // ==========================================
-    // splitLines: FileContent → 줄 단위 문자열 벡터
-    // ==========================================
-    // \n, \r\n, \r 모두 처리
-    std::vector<std::string> splitLines(const FileContent& content) {
-        std::vector<std::string> lines;
-        std::string text(content.data.begin(), content.data.end());
-
-        std::string currentLine;
-        for (size_t i = 0; i < text.size(); i++) {
-            if (text[i] == '\r') {
-                lines.push_back(currentLine);
-                currentLine.clear();
-                // \r\n 처리: \n을 건너뜀
-                if (i + 1 < text.size() && text[i + 1] == '\n') {
-                    i++;
-                }
-            } else if (text[i] == '\n') {
-                lines.push_back(currentLine);
-                currentLine.clear();
-            } else {
-                currentLine += text[i];
-            }
-        }
-        // 마지막 줄 (개행 없이 끝나는 경우)
-        if (!currentLine.empty()) {
-            lines.push_back(currentLine);
-        }
-        return lines;
-    }
-
-    // ==========================================
-    // myersDiff: Myers diff 알고리즘 (핵심)
-    // ==========================================
-    // Eugene W. Myers, 1986, Algorithmica
-    // 편집 그래프에서 (0,0) → (N,M) 최단 경로 탐색
-    // x축 이동 = DELETE, y축 이동 = INSERT, 대각선 = EQUAL
-    //
-    // 시간복잡도: O(ND) - N: 전체 줄 수, D: 차이 수
-    // 공간복잡도: O(D * (N+M)) - traces 배열 저장
-
-    // 내부 편집 연산 타입
-    enum class EditOp { INSERT, DELETE, EQUAL };
-    struct EditEntry {
-        EditOp op;
-        int oldIdx;     // 원본에서의 인덱스 (-1이면 해당 없음)
-        int newIdx;     // 수정본에서의 인덱스 (-1이면 해당 없음)
-    };
-
-    std::vector<DiffLine> myersDiff(const std::vector<std::string>& oldLines,
-                                     const std::vector<std::string>& newLines) {
-        int N = static_cast<int>(oldLines.size());
-        int M = static_cast<int>(newLines.size());
-        int maxD = N + M;
-
-        // 빈 파일 처리
-        if (N == 0 && M == 0) return {};
-        if (N == 0) {
-            std::vector<DiffLine> result;
-            for (int j = 0; j < M; j++) {
-                result.push_back({DiffLineType::ADDED, std::nullopt, j + 1, newLines[j]});
-            }
-            return result;
-        }
-        if (M == 0) {
-            std::vector<DiffLine> result;
-            for (int i = 0; i < N; i++) {
-                result.push_back({DiffLineType::DELETED, i + 1, std::nullopt, oldLines[i]});
-            }
-            return result;
-        }
-
-        // ── Myers 전진 탐색 (Forward pass) ──
-        // V[k]: 대각선 k에서 도달 가능한 최대 x좌표
-        // traces: 각 d 단계의 V 상태를 저장 (역추적용)
-        int offset = maxD;
-        int vSize = 2 * maxD + 1;
-        std::vector<int> V(vSize, -1);
-        V[offset + 1] = 0;  // 초기 상태: k=1, x=0
-
-        std::vector<std::vector<int>> traces;
-
-        int finalD = -1;
-        for (int d = 0; d <= maxD; d++) {
-            traces.push_back(V);
-
-            for (int k = -d; k <= d; k += 2) {
-                // 이동 방향 결정:
-                // k == -d → 아래(INSERT)만 가능
-                // k == d → 오른쪽(DELETE)만 가능
-                // 그 외: V[k-1]과 V[k+1] 비교하여 더 멀리 간 쪽 선택
-                int x;
-                if (k == -d || (k != d && V[offset + k - 1] < V[offset + k + 1])) {
-                    x = V[offset + k + 1];      // INSERT (k+1에서 내려옴)
-                } else {
-                    x = V[offset + k - 1] + 1;  // DELETE (k-1에서 옆으로)
-                }
-                int y = x - k;
-
-                // Snake: 동일한 줄이면 대각선 따라감
-                while (x < N && y < M && oldLines[x] == newLines[y]) {
-                    x++;
-                    y++;
-                }
-
-                V[offset + k] = x;
-
-                // 목표 (N, M) 도달 확인
-                if (x >= N && y >= M) {
-                    finalD = d;
-                    break;
-                }
-            }
-            if (finalD >= 0) break;
-        }
-
-        // ── 역추적 (Backtracking) ──
-        // traces를 역순으로 따라가며 실제 편집 연산 복원
-        // 주의: traces[d]는 d단계 시작 시점의 V 스냅샷 = d-1 완료 후 상태
-        //       따라서 d단계의 편집을 역추적할 때 traces[d]를 참조해야 함
-        std::vector<EditEntry> edits;
-        int x = N, y = M;
-
-        for (int d = finalD; d > 0; d--) {
-            const auto& prevV = traces[d];  // 03/13 수정: d-1 → d (d단계 시작 시점 = d-1 완료 후)
-            int k = x - y;
-
-            int prevK;
-            if (k == -d || (k != d && prevV[offset + k - 1] < prevV[offset + k + 1])) {
-                prevK = k + 1;  // 이전 단계에서 INSERT로 도달
-            } else {
-                prevK = k - 1;  // 이전 단계에서 DELETE로 도달
-            }
-
-            int prevX = prevV[offset + prevK];
-            int prevY = prevX - prevK;
-
-            // Snake 구간 (대각선 = EQUAL)
-            while (x > prevX && y > prevY) {
-                x--; y--;
-                edits.push_back({EditOp::EQUAL, x, y});
-            }
-
-            // 실제 편집 연산
-            if (x == prevX && y > prevY) {
-                y--;
-                edits.push_back({EditOp::INSERT, -1, y});
-            } else if (y == prevY && x > prevX) {
-                x--;
-                edits.push_back({EditOp::DELETE, x, -1});
-            }
-        }
-
-        // 남은 Snake (d=0에서의 초기 대각선)
-        while (x > 0 && y > 0) {
-            x--; y--;
-            edits.push_back({EditOp::EQUAL, x, y});
-        }
-
-        // edits는 역순이므로 뒤집기
-        std::reverse(edits.begin(), edits.end());
-
-        // EditEntry → DiffLine 변환
-        std::vector<DiffLine> result;
-        for (const auto& edit : edits) {
-            DiffLine line;
-            switch (edit.op) {
-                case EditOp::EQUAL:
-                    line.type = DiffLineType::UNCHANGED;
-                    line.oldLineNumber = edit.oldIdx + 1;
-                    line.newLineNumber = edit.newIdx + 1;
-                    line.content = oldLines[edit.oldIdx];
-                    break;
-                case EditOp::DELETE:
-                    line.type = DiffLineType::DELETED;
-                    line.oldLineNumber = edit.oldIdx + 1;
-                    line.newLineNumber = std::nullopt;
-                    line.content = oldLines[edit.oldIdx];
-                    break;
-                case EditOp::INSERT:
-                    line.type = DiffLineType::ADDED;
-                    line.oldLineNumber = std::nullopt;
-                    line.newLineNumber = edit.newIdx + 1;
-                    line.content = newLines[edit.newIdx];
-                    break;
-            }
-            result.push_back(line);
-        }
-        return result;
-    }
-
-    // ==========================================
-    // groupIntoHunks: 연속 변경을 hunk로 그룹핑
-    // ==========================================
-    // GitHub 스타일: 변경 전후 컨텍스트 3줄, 겹치면 병합
-    std::vector<DiffHunk> groupIntoHunks(const std::vector<DiffLine>& diffLines,
-                                          int contextLines = 3) {
-        std::vector<DiffHunk> hunks;
-        if (diffLines.empty()) return hunks;
-
-        // 변경된 줄의 인덱스 수집
-        std::vector<int> changeIndices;
-        for (int i = 0; i < static_cast<int>(diffLines.size()); i++) {
-            if (diffLines[i].type != DiffLineType::UNCHANGED) {
-                changeIndices.push_back(i);
-            }
-        }
-        if (changeIndices.empty()) return hunks;
-
-        // 변경 영역을 컨텍스트 포함하여 그룹핑
-        int totalLines = static_cast<int>(diffLines.size());
-        int groupStart = std::max(0, changeIndices[0] - contextLines);
-        int groupEnd = std::min(totalLines - 1, changeIndices[0] + contextLines);
-
-        std::vector<std::pair<int, int>> groups;
-
-        for (size_t i = 1; i < changeIndices.size(); i++) {
-            int newStart = std::max(0, changeIndices[i] - contextLines);
-            int newEnd = std::min(totalLines - 1, changeIndices[i] + contextLines);
-
-            if (newStart <= groupEnd + 1) {
-                // 겹침 → 병합
-                groupEnd = newEnd;
-            } else {
-                // 분리 → 이전 그룹 저장, 새 그룹 시작
-                groups.push_back({groupStart, groupEnd});
-                groupStart = newStart;
-                groupEnd = newEnd;
-            }
-        }
-        groups.push_back({groupStart, groupEnd});
-
-        // 각 그룹을 DiffHunk로 변환
-        for (const auto& [start, end] : groups) {
-            DiffHunk hunk;
-            hunk.oldStart = 0;
-            hunk.oldCount = 0;
-            hunk.newStart = 0;
-            hunk.newCount = 0;
-
-            bool firstOld = true, firstNew = true;
-
-            for (int i = start; i <= end; i++) {
-                const auto& line = diffLines[i];
-                hunk.lines.push_back(line);
-
-                if (line.type == DiffLineType::UNCHANGED || line.type == DiffLineType::DELETED) {
-                    if (firstOld && line.oldLineNumber.has_value()) {
-                        hunk.oldStart = line.oldLineNumber.value();
-                        firstOld = false;
-                    }
-                    hunk.oldCount++;
-                }
-                if (line.type == DiffLineType::UNCHANGED || line.type == DiffLineType::ADDED) {
-                    if (firstNew && line.newLineNumber.has_value()) {
-                        hunk.newStart = line.newLineNumber.value();
-                        firstNew = false;
-                    }
-                    hunk.newCount++;
-                }
-            }
-            hunks.push_back(hunk);
-        }
-        return hunks;
-    }
-
-    // ==========================================
-    // formatUnifiedDiff: GitHub 스타일 unified diff 출력
-    // ==========================================
-    // 형식: @@ -oldStart,oldCount +newStart,newCount @@
-    std::string formatUnifiedDiff(const std::vector<DiffHunk>& hunks) {
-        std::ostringstream oss;
-        for (const auto& hunk : hunks) {
-            oss << "@@ -" << hunk.oldStart << "," << hunk.oldCount
-                << " +" << hunk.newStart << "," << hunk.newCount << " @@\n";
-
-            for (const auto& line : hunk.lines) {
-                switch (line.type) {
-                    case DiffLineType::ADDED:
-                        oss << "+" << line.content << "\n";
-                        break;
-                    case DiffLineType::DELETED:
-                        oss << "-" << line.content << "\n";
-                        break;
-                    case DiffLineType::UNCHANGED:
-                        oss << " " << line.content << "\n";
-                        break;
-                }
-            }
-        }
-        return oss.str();
-    }
-
-    // ==========================================
-    // generateSummary: 로그용 요약 문자열 생성
-    // ==========================================
-    std::string generateSummary(const DiffResult& result) {
-        if (result.isBinary) {
-            return result.summary;  // 바이너리는 이미 설정됨
-        }
-        return std::to_string(result.addedLines) + " addition(s), " +
-               std::to_string(result.deletedLines) + " deletion(s), " +
-               std::to_string(result.hunks.size()) + " hunk(s)";
-    }
-
-    // ==========================================
-    // computeFNV1a: FNV-1a 해시 (고속 비암호학적 해시)
-    // ==========================================
-    // 03/13 추가 — diff 동일성 비교 전용
-    // 용도: 두 파일이 동일한지 빠르게 판별 (early return 최적화)
-    // 특성: O(n) 시간, 상수 공간, SHA-256 대비 수십 배 빠름
-    // 충돌 확률: 64비트 해시이므로 실용적으로 무시 가능 (diff 비교 목적)
-    // 주의: 암호학적 용도(무결성 검증, DLP)에는 부적합 → SHA-256 사용
-    //
-    // FNV-1a 알고리즘: Fowler–Noll–Vo, 1991
-    // 공개 도메인(public domain) 알고리즘, 라이선스 제약 없음
-    std::string computeFNV1a(const std::vector<uint8_t>& data) {
-        // FNV-1a 64비트 초기값과 소수
-        uint64_t hash = 0xcbf29ce484222325ULL;   // FNV offset basis
-        constexpr uint64_t prime = 0x100000001b3ULL;  // FNV prime
-
-        for (uint8_t byte : data) {
-            hash ^= static_cast<uint64_t>(byte);
-            hash *= prime;
-        }
-
-        // 16진수 문자열로 변환 (16자리)
-        std::ostringstream oss;
-        oss << std::hex << std::setfill('0') << std::setw(16) << hash;
-        return oss.str();
-    }
-
-    // ==========================================
-    // computeSHA256: SHA-256 해시 (암호학적 해시)
-    // ==========================================
-    // FIPS 180-4 참조 구현, 외부 의존성 없음
-    // 03/13 - 역할 변경:
-    //   이전: diff 동일성 판별 + 바이너리 비교 (모든 호출에서 사용)
-    //   현재: 바이너리 파일 해시 표시 전용 (텍스트 diff에서는 FNV-1a 사용)
-    //   향후: DLP 모듈의 파일 무결성 검증용으로 분리 활용 예정
-    std::string computeSHA256(const std::vector<uint8_t>& data) {
-        // SHA-256 상수: 처음 64개 소수의 세제곱근의 소수 부분
-        static const uint32_t K[64] = {
-            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
-            0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-            0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
-            0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-            0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
-            0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-            0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
-            0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-            0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
-            0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-            0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
-            0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-            0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
-            0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
-            0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
-        };
-
-        // 비트 연산 람다
-        auto rotr = [](uint32_t x, int n) -> uint32_t {
-            return (x >> n) | (x << (32 - n));
-        };
-        auto ch = [](uint32_t x, uint32_t y, uint32_t z) -> uint32_t {
-            return (x & y) ^ (~x & z);
-        };
-        auto maj = [](uint32_t x, uint32_t y, uint32_t z) -> uint32_t {
-            return (x & y) ^ (x & z) ^ (y & z);
-        };
-        auto sigma0 = [&rotr](uint32_t x) -> uint32_t {
-            return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22);
-        };
-        auto sigma1 = [&rotr](uint32_t x) -> uint32_t {
-            return rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25);
-        };
-        auto gamma0 = [&rotr](uint32_t x) -> uint32_t {
-            return rotr(x, 7) ^ rotr(x, 18) ^ (x >> 3);
-        };
-        auto gamma1 = [&rotr](uint32_t x) -> uint32_t {
-            return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10);
-        };
-
-        // 초기 해시 값: 처음 8개 소수의 제곱근의 소수 부분
-        uint32_t H[8] = {
-            0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-            0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
-        };
-
-        // 메시지 패딩
-        std::vector<uint8_t> msg(data);
-        uint64_t bitLen = static_cast<uint64_t>(data.size()) * 8;
-        msg.push_back(0x80);
-        while (msg.size() % 64 != 56) {
-            msg.push_back(0x00);
-        }
-        for (int i = 7; i >= 0; i--) {
-            msg.push_back(static_cast<uint8_t>((bitLen >> (i * 8)) & 0xFF));
-        }
-
-        // 64바이트 블록 단위 처리
-        for (size_t offset = 0; offset < msg.size(); offset += 64) {
-            uint32_t W[64];
-
-            // 메시지 스케줄
-            for (int t = 0; t < 16; t++) {
-                W[t] = (static_cast<uint32_t>(msg[offset + t * 4]) << 24) |
-                       (static_cast<uint32_t>(msg[offset + t * 4 + 1]) << 16) |
-                       (static_cast<uint32_t>(msg[offset + t * 4 + 2]) << 8) |
-                       (static_cast<uint32_t>(msg[offset + t * 4 + 3]));
-            }
-            for (int t = 16; t < 64; t++) {
-                W[t] = gamma1(W[t - 2]) + W[t - 7] + gamma0(W[t - 15]) + W[t - 16];
-            }
-
-            // 압축 함수
-            uint32_t a = H[0], b = H[1], c = H[2], d = H[3];
-            uint32_t e = H[4], f = H[5], g = H[6], h = H[7];
-
-            for (int t = 0; t < 64; t++) {
-                uint32_t T1 = h + sigma1(e) + ch(e, f, g) + K[t] + W[t];
-                uint32_t T2 = sigma0(a) + maj(a, b, c);
-                h = g; g = f; f = e;
-                e = d + T1;
-                d = c; c = b; b = a;
-                a = T1 + T2;
-            }
-
-            H[0] += a; H[1] += b; H[2] += c; H[3] += d;
-            H[4] += e; H[5] += f; H[6] += g; H[7] += h;
-        }
-
-        // 해시 결과를 16진수 문자열로 변환
-        std::ostringstream oss;
-        for (int i = 0; i < 8; i++) {
-            oss << std::hex << std::setfill('0') << std::setw(8) << H[i];
-        }
-        return oss.str();
-    }
-};
 
 class DocumentVersionWorkflowAPI {
 private:
@@ -796,13 +209,15 @@ public:
         // 2. 파일 콘텐츠 저장 (maps to OC\Files\Node\File::putContent)
         fileStorage->writeFile(fileId, content);
 
-        // 3. 타임스탬프 기반 고유 버전 ID 생성 (maps to Storage::getVersionNameForFile)
-        // 02/10 - timestamp 문제: 초 단위로 통일 (원본은 system_clock::count()로 나노초 반환)
-        // auto timestamp = std::chrono::system_clock::now().time_since_epoch().count();
+        // 3. 고유 버전 ID 생성 (maps to Storage::getVersionNameForFile)
+        // 02/10 - timestamp 문제: 초 단위로 통일
+        // 03/18 - 버전 ID 충돌 방지: 초단위 timestamp만으로는 1초 내 중복 저장 시 충돌
+        //   수정: timestamp + monotonic counter로 고유성 보장
+        //   예: "file_001.v1710700000_0", "file_001.v1710700000_1" (같은 초에 생성되어도 구분)
         auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()
         ).count();
-        auto versionId = fileId + ".v" + std::to_string(timestamp);
+        auto versionId = fileId + ".v" + std::to_string(timestamp) + "_" + std::to_string(versionCounter++);
 
         // 4. 버전 스냅샷 생성 (maps to OCA\Files_Versions\Storage::store)
         std::string versionPath = "files_versions/" + versionId;
@@ -823,9 +238,11 @@ public:
         // 02/10 - user_id 컬럼 추가, metadata에 author 저장
         // 03/13 - JSON 수동 조립 → buildVersionMetadataJson 헬퍼 사용 (특수문자 이스케이프)
         std::string metadata = buildVersionMetadataJson(userId);
-        db->execute("INSERT INTO files_versions (file_id, user_id, timestamp, size, mimetype, metadata) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    {fileId, userId, std::to_string(timestamp), std::to_string(version.size), version.mimeType, metadata});
+        // 03/18 - MariaDB 호환: timestamp는 예약어이므로 백틱 필요
+        // 03/18 - version_id 컬럼 추가: 초단위 timestamp 충돌 방지 (counter 포함 고유 ID)
+        db->execute("INSERT INTO files_versions (version_id, file_id, user_id, `timestamp`, size, mimetype, metadata) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    {versionId, fileId, userId, std::to_string(timestamp), std::to_string(version.size), version.mimeType, metadata});
 
         // 6. 활동 로그 기록 (maps to Activity logging)
         auditLog->logActivity(userId, fileId, "version_created", "Initial version");
@@ -849,11 +266,11 @@ public:
         // 2. 현재 파일을 버전으로 저장 (maps to FileEventsListener::handle)
         auto currentContent = fileStorage->readFile(fileId);
         // 02/10 - 9.1과 마찬가지로 초 단위로 통일
+        // 03/18 - 버전 ID 충돌 방지: timestamp + counter
         auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()
         ).count();
-        // auto timestamp = std::chrono::system_clock::now().time_since_epoch().count();
-        auto versionId = fileId + ".v" + std::to_string(timestamp);
+        auto versionId = fileId + ".v" + std::to_string(timestamp) + "_" + std::to_string(versionCounter++);
 
         // 3. 버전 스냅샷 생성 (maps to Storage::store)
         // 02/10 - TOCTOU 방지: copyFile 대신 readFile 결과를 writeFile로 저장
@@ -876,9 +293,9 @@ public:
         // 02/10 - user_id 컬럼 추가, metadata에 author 저장
         // 03/13 - JSON 수동 조립 → buildVersionMetadataJson 헬퍼 사용 (특수문자 이스케이프)
         std::string metadata = buildVersionMetadataJson(userId);
-        db->execute("INSERT INTO files_versions (file_id, user_id, timestamp, size, mimetype, metadata) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    {fileId, userId, std::to_string(timestamp), std::to_string(version.size), version.mimeType, metadata});
+        db->execute("INSERT INTO files_versions (version_id, file_id, user_id, `timestamp`, size, mimetype, metadata) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    {versionId, fileId, userId, std::to_string(timestamp), std::to_string(version.size), version.mimeType, metadata});
 
         // 6. 버전 생성 완료 이벤트 (maps to VersionCreatedEvent)
         workflowEngine->dispatchEvent("version_created", {{"fileId", fileId}, {"versionId", versionId}});
@@ -913,10 +330,16 @@ public:
     //       apps/admin_audit/lib/Files.php
     //       apps/files_versions/lib/Db/VersionEntity.php (metadata)
     // 변경 이유(reason)는 Nextcloud 기본 구현에 없어 커스텀 확장 필요
+    // 03/18 - versionId 매개변수 추가 (GPT 리뷰 반영)
+    //   변경 전: file_id + MAX(timestamp)로 최신 버전을 찾아 metadata 갱신
+    //   문제: 같은 초에 여러 버전이 있으면 잘못된 버전까지 업데이트됨
+    //   변경 후: versionId가 있을 때만 해당 버전의 metadata를 정확히 갱신
+    //   호출부 호환: 기존 4인자 호출(setDocumentStatus 등)은 기본값 std::nullopt로 동작
     void logDocumentChangeHistory(const std::string& userId,
                                 const std::string& fileId,
                                 const std::string& action,
-                                const std::string& reason = "") {
+                                const std::string& reason = "",
+                                const std::optional<std::string>& versionId = std::nullopt) {
         // 1. Activity 앱을 통한 기록 (maps to Activity\Data::send)
         ActivityEntry activity;
         activity.userId = userId;
@@ -928,7 +351,6 @@ public:
         activity.subject = "file_" + action;
         activity.objectType = "files";
         activity.objectId = fileId;
-        // activity.message 미사용 문제
         // 02/10 - message 필드 설정
         activity.message = action + (reason.empty() ? "" : " - Reason: " + reason);
 
@@ -936,22 +358,24 @@ public:
         // 커스텀 구현: metadata JSON 필드 또는 별도 테이블 필요
         if (!reason.empty()) {
             activity.reason = reason;
-            // 버전 메타데이터에 이유 저장 (maps to VersionEntity::setMetadataValue)
-            // 02/11 - ORDER BY ... LIMIT을 서브쿼리로 대체 (PostgreSQL 호환을 위하여)
-            db->execute("UPDATE files_versions SET metadata = JSON_SET(metadata, '$.reason', ?) "
-                        "WHERE file_id = ? AND timestamp = "
-                        "(SELECT MAX(timestamp) FROM files_versions WHERE file_id = ?)",
-                        {reason, fileId, fileId});
+            // 03/18 - 특정 버전이 명확할 때만 version metadata 갱신
+            //   versionId가 없는 호출(setDocumentStatus 등)은 activity/audit만 기록
+            //   versionId가 있는 호출(버전 생성/수정)은 해당 버전의 metadata를 정확히 갱신
+            if (versionId.has_value() && !versionId->empty()) {
+                db->execute("UPDATE files_versions "
+                            "SET metadata = JSON_SET(metadata, '$.reason', ?) "
+                            "WHERE version_id = ?",
+                            {reason, *versionId});
+            }
         }
 
         // 2. Activity 테이블에 저장
-        // 02/10 - 구조체 값 사용으로 일관성 확보
-        db->execute("INSERT INTO activity (timestamp, user, affecteduser, app, subject, "
+        // 03/18 - MariaDB 호환: timestamp, user는 예약어이므로 백틱 필요
+        db->execute("INSERT INTO activity (`timestamp`, `user`, affecteduser, app, subject, "
                     "subjectparams, file, object_type, object_id) "
                     "VALUES (?, ?, ?, 'files', ?, ?, ?, ?, ?)",
                     {std::to_string(activity.timestamp), activity.userId, activity.userId, activity.subject,
                     "{}", activity.objectId, activity.objectType, activity.objectId});
-        // DB INSERT할 때는 구조체를 안 쓰고 직접 값을 넣음 e.g., activity.userId 안 씀
 
         // 3. Admin Audit 로그 (maps to Admin_Audit\Files)
         if (isAdminAuditEnabled()) {
@@ -960,6 +384,10 @@ public:
                                 + ", File: " + fileId;
             if (!reason.empty()) {
                 auditLogMsg += ", Reason: " + reason;
+            }
+            // 03/18 - versionId가 있으면 감사 로그에 포함
+            if (versionId.has_value() && !versionId->empty()) {
+                auditLogMsg += ", Version: " + *versionId;
             }
             writeAuditLog(auditLogMsg);
         }
@@ -1041,13 +469,22 @@ public:
                                                 int limit = 10) {
         std::vector<VersionInfo> versions;
 
+        // 03/18 - limit 범위 방어 (GPT 리뷰 반영)
+        //   변경 전: limit를 검증 없이 SQL 문자열에 직접 삽입
+        //   문제: 음수나 과도한 값 시 쿼리 의미 이상 + 성능 문제
+        //   변경 후: 1~100 범위로 clamp
+        constexpr int kMinLimit = 1;
+        constexpr int kMaxLimit = 100;
+        if (limit < kMinLimit) limit = kMinLimit;
+        else if (limit > kMaxLimit) limit = kMaxLimit;
+
         // 1. 모든 버전 목록 조회 (maps to Storage::getVersions)
         // 02/10 - LIMIT 값을 직접 삽입 (바인딩 파라미터 호환성 문제 방지)
         auto results = db->query(
-            "SELECT file_id, user_id, timestamp, size, mimetype, metadata "
+            "SELECT version_id, file_id, user_id, `timestamp`, size, mimetype, metadata "
             "FROM files_versions "
-            "WHERE file_id = ? AND timestamp <= ? "
-            "ORDER BY timestamp DESC "
+            "WHERE file_id = ? AND `timestamp` <= ? "
+            "ORDER BY `timestamp` DESC "
             "LIMIT " + std::to_string(limit), 
             {fileId, std::to_string(targetTimestamp)}
         );                      
@@ -1056,7 +493,7 @@ public:
         for (const auto& row : results) {
             VersionInfo version;
             version.fileId = row.at("file_id");
-            version.versionId = version.fileId + ".v" + row.at("timestamp");
+            version.versionId = row.at("version_id");  // 03/18 - DB에서 직접 조회 (조합 제거)
             version.timestamp = std::stoll(row.at("timestamp"));
             version.size = std::stoull(row.at("size"));
             version.mimeType = row.at("mimetype");
@@ -1079,9 +516,10 @@ public:
         if (versions.empty() && targetTimestamp > 0) {
             // 지정된 시간보다 이후의 가장 오래된 버전 찾기
             auto futureResults = db->query(
-                "SELECT * FROM files_versions "
-                "WHERE file_id = ? AND timestamp > ? "
-                "ORDER BY timestamp ASC LIMIT 1",
+                "SELECT version_id, file_id, user_id, `timestamp`, size, mimetype, metadata "
+                "FROM files_versions "
+                "WHERE file_id = ? AND `timestamp` > ? "
+                "ORDER BY `timestamp` ASC LIMIT 1",
                 {fileId, std::to_string(targetTimestamp)}
             );
 
@@ -1090,7 +528,7 @@ public:
                 const auto& row = futureResults[0];
                 VersionInfo version;
                 version.fileId = row.at("file_id");
-                version.versionId = version.fileId + ".v" + row.at("timestamp");
+                version.versionId = row.at("version_id");  // 03/18 - DB에서 직접 조회
                 version.timestamp = std::stoll(row.at("timestamp"));
                 version.size = std::stoull(row.at("size"));
                 version.mimeType = row.at("mimetype");
@@ -1173,7 +611,8 @@ public:
         }
 
         // 5. 새 상태 태그 할당 (maps to ISystemTagObjectMapper::assignTags)
-        db->execute("INSERT OR REPLACE INTO systemtag_object_mapping "
+        // 03/18 - MariaDB 호환: INSERT OR REPLACE(SQLite 전용) → REPLACE INTO
+        db->execute("REPLACE INTO systemtag_object_mapping "
                     "(objectid, objecttype, systemtagid) "
                     "VALUES (?, 'files', ?)", {fileId, tagId});
 
@@ -1235,15 +674,27 @@ public:
                 }
 
                 // 1. pending 태그 할당 (승인 요청 시작)
-                setDocumentStatus(userId, fileId, DocumentStatus::UNDER_REVIEW,
-                                "Approval requested: " + comment);
+                // 03/18 - setDocumentStatus 반환값 검사 추가
+                //   배경: 03/05에 전이 검증이 추가되면서 실패 가능해졌으나 호출부 미업데이트
+                //   문제: 전이 실패 시에도 approval_rules, approvers INSERT가 진행되어
+                //         상태는 변경되지 않은 채 승인 규칙만 존재하는 불일치 발생
+                //   수정: false 반환 시 로그 기록 후 break (success = false 유지)
+                if (!setDocumentStatus(userId, fileId, DocumentStatus::UNDER_REVIEW,
+                                "Approval requested: " + comment)) {
+                    auditLog->logActivity(userId, fileId, "approval_failed",
+                                        "Failed to transition to UNDER_REVIEW");
+                    break;  // success = false 유지
+                }
 
                 // 2. 승인 규칙 생성/확인 (maps to RuleService::createRule)
                 // 02/10 - file_id를 규칙에 연결하여 파일별 승인 관리
                 // 03/05 - 태그 이름을 클래스 상수로 파라미터화
+                // 03/18 - status 컬럼 추가: 승인 규칙 생명주기 관리
+                //   문제: 승인/거절 후 rule을 종료하지 않아 오래된 규칙이 유효하게 남음
+                //   수정: OPEN(진행 중) / CLOSED(완료) 상태로 관리
                 std::string ruleId = generateUUID();
-                db->execute("INSERT INTO approval_rules (id, file_id, tag_pending, tag_approved, tag_rejected) "
-                            "VALUES (?, ?, ?, ?, ?)", {ruleId, fileId, TAG_UNDER_REVIEW, TAG_APPROVED, TAG_REJECTED});
+                db->execute("INSERT INTO approval_rules (id, file_id, tag_pending, tag_approved, tag_rejected, status) "
+                            "VALUES (?, ?, ?, ?, ?, 'OPEN')", {ruleId, fileId, TAG_UNDER_REVIEW, TAG_APPROVED, TAG_REJECTED});
 
                 // 3. 요청자 등록 (maps to approval_rule_requesters)
                 db->execute("INSERT INTO approval_rule_requesters (rule_id, entity_type, entity_id) "
@@ -1258,7 +709,7 @@ public:
                     notificationService->sendNotification(approver,
                         "Approval requested for file " + fileId,
                         "User " + userId + " requested your approval. Comment: " + comment,
-                        {"push", "email", "web"});
+                        {NotificationChannel::PUSH, NotificationChannel::EMAIL, NotificationChannel::WEB});
                 }
 
                 success = true;
@@ -1333,7 +784,7 @@ public:
             };
 
             // 3. DB에 알림 저장 (maps to notifications table)
-            db->execute("INSERT INTO notifications (notification_id, app, user, timestamp,"
+            db->execute("INSERT INTO notifications (notification_id, app, `user`, `timestamp`,"
                         "object_type, object_id, subject, message) "
                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                         {notificationId, "files", target.userId, std::to_string(eventTimestamp),
@@ -1341,24 +792,31 @@ public:
 
             // 4. 채널별 전달 (maps to various delivery mechanisms)
             for (const auto& channel : target.channels) {
-                if (channel == "push") {
-                    // 푸시 알림 (maps to Push::pushToDevice)
-                    auto pushTokens = db->query("SELECT token FROM notifications_pushhash "
-                                                "WHERE uid = ?", {target.userId});
-                    for (const auto& token : pushTokens) {
-                        sendPushNotification(token.at("token"), message);
+                // 03/18 - 문자열 비교 → enum switch (GPT 리뷰 반영)
+                switch (channel) {
+                    case NotificationChannel::PUSH: {
+                        // 푸시 알림 (maps to Push::pushToDevice)
+                        auto pushTokens = db->query("SELECT token FROM notifications_pushhash "
+                                                    "WHERE uid = ?", {target.userId});
+                        for (const auto& token : pushTokens) {
+                            sendPushNotification(token.at("token"), message);
+                        }
+                        break;
                     }
 
-                } else if (channel == "email") {
-                    // 이메일 큐에 추가 (maps to mail queue)
-                    db->execute("INSERT INTO notifications_mq (amq_timestamp, amq_affecteduser, "
-                                "amq_appid, amq_subject, amq_subjectparams) "
-                                "VALUES (?, ?, 'files', ?, ?)",
-                                {std::to_string(eventTimestamp), target.userId, eventType, message});
+                    case NotificationChannel::EMAIL: {
+                        // 이메일 큐에 추가 (maps to mail queue)
+                        db->execute("INSERT INTO notifications_mq (amq_timestamp, amq_affecteduser, "
+                                    "amq_appid, amq_subject, amq_subjectparams) "
+                                    "VALUES (?, ?, 'files', ?, ?)",
+                                    {std::to_string(eventTimestamp), target.userId, eventType, message});
+                        break;
+                    }
 
-                } else if (channel == "web") {
-                    // 웹 알림은 이미 notifications 테이블에 저장됨
-                    // 클라이언트가 폴링하거나 WebSocket으로 수신
+                    case NotificationChannel::WEB:
+                        // 웹 알림은 이미 notifications 테이블에 저장됨
+                        // 클라이언트가 폴링하거나 WebSocket으로 수신
+                        break;
                 }
             }
         }
@@ -1397,8 +855,9 @@ public:
         // policyString은 아래 정리 작업 로그에서 사용됨
 
         // 2. 파일의 모든 버전 조회 (maps to Storage::getVersions)
-        auto versions = db->query("SELECT file_id, timestamp, size FROM files_versions "
-                                "WHERE file_id = ? ORDER BY timestamp DESC", {fileId});
+        // 03/18 - version_id 컬럼 추가 조회 (삭제 시 고유 식별자로 사용)
+        auto versions = db->query("SELECT version_id, file_id, `timestamp`, size FROM files_versions "
+                                "WHERE file_id = ? ORDER BY `timestamp` DESC", {fileId});
 
         // 3. 보존할 버전과 삭제할 버전 결정 (maps to Expiration::getExpireList)
         // 03/05 - vector → unordered_set: 할당량 정리 시 중복 체크를 O(1)로 개선
@@ -1428,14 +887,14 @@ public:
 
             // 최대 버전 수 체크
             if (policy.maxVersions > 0 && versionCount > policy.maxVersions) {
-                toDeleteSet.insert(version.at("file_id") + ".v" + version.at("timestamp"));
+                toDeleteSet.insert(version.at("version_id"));
                 continue;
             }
 
             // 최대 보관 기간 체크
             // 02/10 - 초 단위 통일 - 86400초 = 1일
             if (policy.maxDays > 0 && versionAge > (int64_t)policy.maxDays * 86400) {
-                toDeleteSet.insert(version.at("file_id") + ".v" + version.at("timestamp"));
+                toDeleteSet.insert(version.at("version_id"));
                 continue;
             }
 
@@ -1456,15 +915,23 @@ public:
                 lastKeptTimestamp = vTimestamp;
             } else if (policy.autoCleanup) {
                 // 간격 부족 → 삭제 대상
-                toDeleteSet.insert(version.at("file_id") + ".v" + version.at("timestamp"));
+                toDeleteSet.insert(version.at("version_id"));
             }
         }
 
         // 4. 할당량 기반 추가 정리 (maps to quota-based cleanup)
         if (policy.autoCleanup) {
+            // 03/18 - 과삭제(over-delete) 방지:
+            //   변경 전: 전체 버전 size를 합산 → 이미 삭제 예정인 버전 용량이 포함되어
+            //           quota 초과가 실제보다 크게 판단됨 → 불필요한 추가 삭제 발생
+            //   변경 후: toDeleteSet에 이미 포함된 버전의 size를 제외한 실효 용량으로 판단
             size_t totalSize = 0;
             for (const auto& version : versions) {
-                totalSize += std::stoull(version.at("size"));
+                std::string vid = version.at("version_id");
+                if (toDeleteSet.find(vid) == toDeleteSet.end()) {
+                    // 보존 예정인 버전만 용량에 포함
+                    totalSize += std::stoull(version.at("size"));
+                }
             }
 
             size_t quotaLimit = getQuotaLimit();
@@ -1473,7 +940,7 @@ public:
                 if (versions.size() >= 3) {
                     // int 캐스팅으로 unsigned underflow 방지
                     for (int i = static_cast<int>(versions.size()) - 1; i >= 2 && totalSize > quotaLimit; i--) {
-                        auto versionId = versions[i].at("file_id") + ".v" + versions[i].at("timestamp");
+                        auto versionId = versions[i].at("version_id");  // 03/18 - DB에서 직접 조회
                         // 03/05 - unordered_set::find로 중복 체크 O(1) (기존: std::find O(n))
                         if (toDeleteSet.find(versionId) == toDeleteSet.end()) {
                             toDeleteSet.insert(versionId);
@@ -1490,9 +957,11 @@ public:
             fileStorage->deleteFile("files_versions/" + versionId);
 
             // DB에서 삭제
-            auto timestamp = extractTimestamp(versionId);
-            db->execute("DELETE FROM files_versions WHERE file_id = ? AND timestamp = ?",
-                        {fileId, timestamp});
+            // 03/18 - version_id 기반 삭제로 변경
+            //   변경 전: file_id + timestamp로 삭제 → 같은 초에 생성된 버전이 2개면 모두 삭제됨
+            //   변경 후: version_id(고유)로 삭제 → 정확히 해당 버전만 삭제
+            db->execute("DELETE FROM files_versions WHERE version_id = ?",
+                        {versionId});
 
             deletedVersions++;
         }
@@ -1509,8 +978,10 @@ public:
 
 private:
     // 헬퍼 함수들
-    // 정적 카운터로 UUID 고유성 보장
+    // 정적 카운터로 고유성 보장
     int uuidCounter = 0;
+    int versionCounter = 0;  // 03/18 - 버전 ID 충돌 방지용 monotonic counter
+
     std::string generateUUID() {
         // UUID 생성 로직
         // 02/10 - timestamp + 카운터로 빠른 연속 생성에서도 고유성 보장
@@ -1519,11 +990,20 @@ private:
         ).count()) + "_" + std::to_string(uuidCounter++);
     }
 
+    // 03/18 수정: versionId에서 타임스탬프 추출
+    //   변경 전: find(".v") → fileId에 ".v"가 포함되면 잘못된 위치에서 파싱
+    //   변경 후: rfind(".v") → 마지막 ".v"를 찾아 안전하게 파싱
+    //   새 포맷: "fileId.v{timestamp}_{counter}" → "{timestamp}" 반환
     std::string extractTimestamp(const std::string& versionId) {
-        // versionId에서 타임스탬프 추출 (예: "fileId.v123456" → "123456")
-        auto pos = versionId.find(".v");
+        auto pos = versionId.rfind(".v");  // 03/18: find → rfind (fileId에 .v 포함 시 안전)
         if (pos != std::string::npos) {
-            return versionId.substr(pos + 2);
+            std::string suffix = versionId.substr(pos + 2);  // "1710700000_0"
+            // 03/18: counter 접미사("_0") 제거하여 순수 timestamp만 반환
+            auto underscorePos = suffix.rfind('_');
+            if (underscorePos != std::string::npos) {
+                return suffix.substr(0, underscorePos);  // "1710700000"
+            }
+            return suffix;  // fallback: counter 없는 레거시 형식
         }
         return "";
     }
@@ -1550,10 +1030,13 @@ private:
                                   const std::string& notifySubject,
                                   const std::string& actionVerb) {
         // 1. 승인/거절 권한 확인
+        // 03/18 - status='OPEN' 조건 추가: 이미 처리 완료(CLOSED)된 규칙은 매칭하지 않음
+        //   변경 전: tag_pending과 file_id만 확인 → 오래된 규칙이 계속 매칭됨
+        //   변경 후: OPEN 상태인 규칙만 매칭 → stale rule 방지
         auto approverCheck = db->query(
             "SELECT rule_id FROM approval_rule_approvers "
             "WHERE entity_id = ? AND rule_id IN "
-            "(SELECT id FROM approval_rules WHERE tag_pending = ? AND file_id = ?)",
+            "(SELECT id FROM approval_rules WHERE tag_pending = ? AND file_id = ? AND status = 'OPEN')",
             {userId, TAG_UNDER_REVIEW, fileId}
         );
 
@@ -1564,17 +1047,27 @@ private:
         std::string ruleId = approverCheck[0]["rule_id"];
 
         // 2. 상태 태그 변경
-        std::string statusComment = actionVerb.substr(0, 1);
-        // 첫 글자 대문자로: "approved" → "Approved"
-        statusComment = static_cast<char>(std::toupper(static_cast<unsigned char>(actionVerb[0])))
-                        + actionVerb.substr(1) + ": " + comment;
-        setDocumentStatus(userId, fileId, newStatus, statusComment);
+        // 03/18 - dead code 제거: actionVerb.substr(0,1) 대입 후 즉시 덮어쓰던 코드 정리
+        // 03/18 - setDocumentStatus 반환값 검사 추가
+        //   배경: 03/05에 isValidTransition이 추가되면서 setDocumentStatus가 false를
+        //         반환할 수 있게 되었으나, 호출부가 이를 무시하여 상태 전이 실패 시에도
+        //         승인 기록(approval_activity)과 알림이 진행되는 버그 발생
+        //   수정: false 반환 시 로그 기록 후 즉시 실패 반환
+        std::string statusComment = static_cast<char>(std::toupper(
+            static_cast<unsigned char>(actionVerb[0])))
+            + actionVerb.substr(1) + ": " + comment;
+
+        if (!setDocumentStatus(userId, fileId, newStatus, statusComment)) {
+            auditLog->logActivity(userId, fileId, "approval_" + actionVerb + "_failed",
+                                "Status transition to " + std::string(actionTag) + " failed");
+            return false;
+        }
 
         // 3. 승인/거절 액션 기록 (maps to RuleService::storeAction)
         auto timestamp = std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()).count());
         db->execute("INSERT INTO approval_activity (rule_id, user_id, action, "
-                    "timestamp, comment) VALUES (?, ?, ?, ?, ?)",
+                    "`timestamp`, comment) VALUES (?, ?, ?, ?, ?)",
                     {ruleId, userId, actionTag, timestamp, comment});
 
         // 4. 요청자에게 알림
@@ -1584,12 +1077,33 @@ private:
         );
         if (!requester.empty()) {
             std::string notifyBody = "File " + fileId + " has been " + actionVerb + " by " + userId;
+            // 03/18 - 설계 검토 필요 (보고서 포함 대상)
+            // 현재 동작: REJECT일 때만 comment를 알림 본문에 포함
+            // 문제 인식: APPROVE 시에도 승인자가 comment를 남길 수 있으나
+            //           (예: "조건부 승인: 2절 수정 후 배포 바람") 알림에 포함되지 않음
+            // 원인 추정: 원래 APPROVE/REJECT가 별도 case였을 때 REJECT 쪽에만
+            //           comment 처리가 있었고, 03/13 리팩토링에서 그대로 합쳐진 것
+            // 명세서 확인: RD-SRS-9.7(승인 워크플로우), RD-SRS-9.9(알림)
+            //             모두 알림 본문의 세부 필드까지는 정의하지 않음
+            // 결정 필요:
+            //   방안 A - APPROVE에도 comment 포함: 조건을 if (!comment.empty())로 변경
+            //   방안 B - 현재 유지 (REJECT만): 거절 사유만 필수 전달, 승인 comment는 부가 정보
+            // → 설계 단계에서 알림 본문 스펙 정의 시 확정 예정
             if (!comment.empty() && actionVerb == "rejected") {
                 notifyBody += ". Comment: " + comment;
             }
             notificationService->sendNotification(requester[0]["entity_id"],
-                notifySubject, notifyBody, {"push", "email", "web"});
+                notifySubject, notifyBody,
+                {NotificationChannel::PUSH, NotificationChannel::EMAIL, NotificationChannel::WEB});
         }
+
+        // 5. 승인 규칙 종료 (OPEN → CLOSED)
+        // 03/18 - stale rule 방지: 승인/거절 완료 후 규칙을 CLOSED로 전환
+        //   변경 전: 규칙이 영구적으로 OPEN 상태로 남아 동일 파일의
+        //           이후 승인 요청에서 오래된 규칙이 매칭되는 문제
+        //   변경 후: 처리 완료 시 CLOSED로 전환하여 재매칭 방지
+        db->execute("UPDATE approval_rules SET status = 'CLOSED' WHERE id = ?",
+                    {ruleId});
 
         return true;
     }
@@ -1597,20 +1111,20 @@ private:
     // 03/05 - 파일의 현재 문서 상태를 태그 기반으로 조회
     // 반환: 현재 상태 태그 이름 (예: "draft", "approved")
     //       태그가 없으면 빈 문자열 (새 파일이거나 상태 미지정)
+    // 03/18 - 5회 순회 쿼리 → 단일 JOIN 쿼리로 개선
+    //   변경 전: 태그 5개를 for문으로 순회하며 매번 DB 쿼리 (최대 5회)
+    //   변경 후: JOIN + IN 절로 1회 쿼리
+    //   효과: setDocumentStatus 호출마다 최대 4회 불필요한 쿼리 제거
+    //   참고: 실제 성능 차이는 DB 연동 후 체감 가능
     std::string getCurrentStatusTag(const std::string& fileId) {
-        std::vector<std::string> statusTags = {TAG_DRAFT, TAG_UNDER_REVIEW, TAG_APPROVED, TAG_REJECTED, TAG_DEPRECATED};
-        for (const auto& tag : statusTags) {
-            auto result = db->query(
-                "SELECT systemtagid FROM systemtag_object_mapping "
-                "WHERE objectid = ? AND objecttype = 'files' "
-                "AND systemtagid IN (SELECT id FROM systemtag WHERE name = ?)",
-                {fileId, tag}
-            );
-            if (!result.empty()) {
-                return tag;
-            }
-        }
-        return "";  // 상태 없음 (새 파일)
+        auto result = db->query(
+            "SELECT st.name FROM systemtag_object_mapping som "
+            "JOIN systemtag st ON som.systemtagid = st.id "
+            "WHERE som.objectid = ? AND som.objecttype = 'files' "
+            "AND st.name IN (?, ?, ?, ?, ?)",
+            {fileId, TAG_DRAFT, TAG_UNDER_REVIEW, TAG_APPROVED, TAG_REJECTED, TAG_DEPRECATED}
+        );
+        return result.empty() ? "" : result[0].at("name");
     }
 
     // 03/05 - 상태 전이 유효성 검사
