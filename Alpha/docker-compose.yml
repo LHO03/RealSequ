@@ -1,0 +1,41 @@
+# 시연 환경: MariaDB 10.11 LTS + Adminer (DB 직접 조회용)
+# 메모리에 기록된 환경(MariaDB+Redis+Nextcloud+Adminer)을 시연 최소로 줄임
+# 사용:
+#   docker-compose up -d
+#   ./gradlew bootRun  (별도 터미널)
+# DB 직접 조회: http://localhost:8081 (Adminer)
+#   Server: mariadb, User: docver, Password: docver_pw, Database: docver
+version: '3.8'
+
+services:
+  mariadb:
+    image: mariadb:10.11
+    container_name: docver-mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: root_pw
+      MARIADB_DATABASE: docver
+      MARIADB_USER: docver
+      MARIADB_PASSWORD: docver_pw
+    ports:
+      - "3306:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  adminer:
+    image: adminer:latest
+    container_name: docver-adminer
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+volumes:
+  mariadb_data:

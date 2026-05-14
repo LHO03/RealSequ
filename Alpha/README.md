@@ -43,6 +43,32 @@ DB 직접 조회: <http://localhost:8081> (Adminer, user=docver/pw=docver_pw/db=
 - Gradle 8.5 이상 (`gradle -v`)
 - Docker + docker-compose
 
+## 통합 테스트
+
+Testcontainers 기반. MariaDB 컨테이너를 자동으로 띄워 시연 시나리오를 검증한다.
+
+```bash
+# 전체 테스트 실행
+./gradlew test
+
+# 특정 클래스만
+./gradlew test --tests Scenario1IntegrationTest
+```
+
+테스트 구성 (총 28개):
+
+| 파일 | 검증 영역 | 테스트 수 |
+|---|---|---|
+| `ContainerSetupSmokeTest` | 컨테이너 + 스키마 셋업 | 3 |
+| `Scenario1IntegrationTest` | 시연 8단계 흐름 + 검토 회귀 + 에러 케이스 + 알림 읽음 | 12 |
+| `ApiIntegrationTest` | REST 엔드포인트 + DTO 검증 + 예외 매핑 | 7 |
+| `StateTransitionMatrixTest` | 상태 전이 매트릭스 (결정 12~17 일부) | 5 |
+| `IntegrationTestBase` | 공통 베이스 (테스트 아님) | - |
+
+**시연 직전 권장**: `./gradlew test` 한 번 돌려서 28개 모두 green인지 확인.
+
+회의 중 박사님이 "이게 실제로 동작합니까"라고 물으실 때 → `Scenario1IntegrationTest`의 happyPath 테스트 코드를 보여드리는 것이 가장 직접적인 답이 됩니다.
+
 ## 이식 범위
 
 ### 포함
