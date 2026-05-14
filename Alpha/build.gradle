@@ -44,4 +44,10 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    // 05/14 - 테스트는 기본 비활성화 (Docker 의존)
+    //   Docker Desktop이 실행 중일 때만 ./gradlew test -PrunTests=true 로 실행
+    //   시연 본체(bootRun)는 테스트 없이도 동작
+    if (!project.hasProperty('runTests')) {
+        enabled = false
+    }
 }

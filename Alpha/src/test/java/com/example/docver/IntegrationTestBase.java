@@ -35,6 +35,8 @@ public abstract class IntegrationTestBase {
 
     // static으로 선언하여 JVM 전체에서 1개 컨테이너만 사용
     // @Container 어노테이션 대신 수동 start로 라이프사이클 명시 관리
+    // 05/14 - resource leak 경고는 의도된 동작 (JVM 종료까지 컨테이너 유지)
+    @SuppressWarnings("resource")
     protected static final MariaDBContainer<?> MARIADB;
 
     static {

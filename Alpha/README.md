@@ -45,14 +45,14 @@ DB 직접 조회: <http://localhost:8081> (Adminer, user=docver/pw=docver_pw/db=
 
 ## 통합 테스트
 
-Testcontainers 기반. MariaDB 컨테이너를 자동으로 띄워 시연 시나리오를 검증한다.
+Testcontainers 기반. **Docker Desktop 실행 필요**. Docker 없는 환경에서는 기본 비활성화됨.
 
 ```bash
-# 전체 테스트 실행
-./gradlew test
+# Docker Desktop 실행 중인 경우에만:
+./gradlew test -PrunTests=true
 
 # 특정 클래스만
-./gradlew test --tests Scenario1IntegrationTest
+./gradlew test -PrunTests=true --tests Scenario1IntegrationTest
 ```
 
 테스트 구성 (총 28개):
@@ -65,9 +65,13 @@ Testcontainers 기반. MariaDB 컨테이너를 자동으로 띄워 시연 시나
 | `StateTransitionMatrixTest` | 상태 전이 매트릭스 (결정 12~17 일부) | 5 |
 | `IntegrationTestBase` | 공통 베이스 (테스트 아님) | - |
 
-**시연 직전 권장**: `./gradlew test` 한 번 돌려서 28개 모두 green인지 확인.
+**참고**: 시연 본체(`bootRun`)는 테스트 없이도 동작합니다. 회의 시연 직전 빠른 시동을 위해 테스트는 기본 비활성화 (`build.gradle`의 `if (!project.hasProperty('runTests')) enabled = false`).
 
 회의 중 박사님이 "이게 실제로 동작합니까"라고 물으실 때 → `Scenario1IntegrationTest`의 happyPath 테스트 코드를 보여드리는 것이 가장 직접적인 답이 됩니다.
+
+## 회의 시연
+
+`DEMO_RUNBOOK.md` 참조 — MariaDB 띄우는 3가지 옵션 (Docker/로컬/Portable) + 8단계 시연 가이드 + 박사님 예상 질문 대응.
 
 ## 이식 범위
 
