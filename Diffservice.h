@@ -320,8 +320,11 @@ public:
                 auto oldResult = textExtractor.extractText(oldContent);
                 auto newResult = textExtractor.extractText(newContent);
 
-                // 추출 성공: 텍스트 기반 diff 수행 (빈 문서도 success=true이면 diff 진행)
-                if (oldResult.success || newResult.success) {
+                // 추출 성공: 두 버전 모두 성공한 경우에만 텍스트 기반 diff 수행
+                // 버그 수정: || 조건은 한쪽만 성공해도 TEXT_EXTRACTED로 처리하여
+                //   실패한 쪽이 빈 텍스트로 취급되고 "전체 내용이 추가/삭제됨"처럼 보이는 문제 발생
+                //   → && 조건으로 변경: 한쪽이라도 실패하면 HASH_ONLY로 fallback
+                if (oldResult.success && newResult.success) {
                     result.isBinary = true;
                     result.method = DiffMethod::TEXT_EXTRACTED;
 
@@ -329,7 +332,8 @@ public:
                     auto newLines = splitTextLines(newResult.text);
                     return buildTextDiffResult(result, oldLines, newLines);
                 }
-                // 추출 실패: HASH_ONLY로 fallback (아래로 진행)
+                // 한쪽 또는 양쪽 추출 실패: HASH_ONLY로 fallback
+                // (부분 추출 성공을 TEXT_EXTRACTED로 처리하면 잘못된 diff 표시 위험)
             }
 
             // 순수 바이너리 또는 텍스트 추출 실패: 해시 비교만

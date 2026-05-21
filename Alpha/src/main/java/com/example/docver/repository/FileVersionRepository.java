@@ -79,4 +79,16 @@ public class FileVersionRepository {
                 ROW_MAPPER, fileId, limit, offset
         );
     }
+
+    /**
+     * 파일의 전체 버전 수.
+     * 의사코드 countVersions (line 666) 이식 — targetTimestamp 매개변수는 시연 단순화로 생략 (전체 카운트).
+     */
+    public long countByFileId(String fileId) {
+        Long count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM files_versions WHERE file_id = ?",
+                Long.class, fileId
+        );
+        return count == null ? 0 : count;
+    }
 }

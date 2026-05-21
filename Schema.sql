@@ -25,50 +25,124 @@ DROP TABLE IF EXISTS systemtag;
 DROP TABLE IF EXISTS activity;
 DROP TABLE IF EXISTS version_diffs;
 DROP TABLE IF EXISTS files_versions;
+DROP TABLE IF EXISTS documents;
+
+-- ============================================================
+-- 0. documents: 문서 master 테이블 (RD-SRS-9.1)
+-- ============================================================
+-- 05/18 - ID 정책 개정 반영:
+--   - file_id를 UUID(CHAR(36))로 사용하여 문서의 평생 식별자 역할.
+--   - current_path는 사용자 표시용. 이동/이름변경 시 이 컬럼만 UPDATE.
+--   - current_version_id / current_revision_no는 "현재 최신 버전" 포인터.
+--     onDocumentModified가 새 버전 생성 시 두 컬럼을 함께 UPDATE.
+--   - current_version_id ↔ files_versions.version_id 의 순환 참조 회피를 위해
+--     이 컬럼에는 FK를 의도적으로 걸지 않는다 (DELETE 순서 종속성 회피).
+-- 코드 참조:
+--   createInitialVersion → INSERT (file_id, owner_user_id, current_path, original_name,
+--                                  current_version_id, current_revision_no, created_at, updated_at)
+--   onDocumentModified   → SELECT (current_version_id, current_revision_no),
+--                          UPDATE (current_version_id, current_revision_no, updated_at)
+CREATE TABLE IF NOT EXISTS documents (
+    file_id             CHAR(36)      NOT NULL COMMENT '문서 고유 ID(UUID)',
+    owner_user_id       VARCHAR(255)  NOT NULL COMMENT '문서 소유자',
+    current_path        VARCHAR(1024) NOT NULL COMMENT '사용자가 보는 현재 문서 경로 (이동/이름변경 시 UPDATE)',
+    original_name       VARCHAR(255)  NOT NULL COMMENT '최초 파일명',
+    current_version_id  CHAR(36)      DEFAULT NULL COMMENT '현재 최신 버전 ID(UUID). FK 미설정(순환 참조 회피)',
+    current_revision_no BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '현재 최신 리비전 번호 (사용자 표시용)',
+    created_at          BIGINT        NOT NULL COMMENT '생성 시각',
+    updated_at          BIGINT        NOT NULL COMMENT '수정 시각',
+    deleted_at          BIGINT        DEFAULT NULL COMMENT '삭제 시각 (soft delete)',
+
+    PRIMARY KEY (file_id),
+    INDEX idx_documents_owner_path (owner_user_id, current_path),
+    INDEX idx_documents_current_version (current_version_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='문서 master 테이블 (RD-SRS-9.1)';
 
 -- ============================================================
 -- 1. files_versions: 파일 버전 관리 (RD-SRS-9.1, 9.2, 9.5, 9.10)
 -- ============================================================
--- 코드 참조:
---   createInitialVersion  → INSERT (version_id, file_id, user_id, `timestamp`, size, mimetype, metadata)
---   onDocumentModified    → INSERT (동일)
+-- 코드 참조 (05/18 ID 정책 개정 후):
+--   createInitialVersion  → INSERT (version_id, file_id, revision_no, user_id,
+--                                   `timestamp`, size, mimetype, storage_key, metadata)
+--   onDocumentModified    → INSERT (동일 컬럼셋)
+--                          SELECT storage_key (이전 버전 콘텐츠 읽기 위해)
 --   logDocumentChangeHistory → UPDATE metadata (JSON_SET)
---   getVersionsAtTime     → SELECT (file_id, user_id, `timestamp`, size, mimetype, metadata)
---   applyVersionRetentionPolicy → SELECT (version_id, file_id, `timestamp`, size), DELETE (version_id)
--- 03/18 - version_id 추가: 초단위 timestamp 충돌 방지 (timestamp + counter)
+--   getVersionsAtTime     → SELECT (version_id, file_id, revision_no, user_id,
+--                                   `timestamp`, size, mimetype, storage_key, metadata)
+--   prepareVersionComparison → SELECT storage_key (콘텐츠 읽기 위해)
+--   deleteVersion         → SELECT (file_id, `timestamp`, user_id, storage_key),
+--                          DELETE (version_id)
+--   applyVersionRetentionPolicy → SELECT (version_id, file_id, `timestamp`,
+--                                         size, storage_key),
+--                                 DELETE (version_id)
+--
+-- 05/18 - ID 정책:
+--   version_id    : UUID. 내부 식별자. 외부 노출/FK용. 의미 없음(=보안상 좋은 성질)
+--   file_id       : UUID. documents.file_id 참조
+--   revision_no   : 사용자에게 보이는 버전 번호 (1, 2, 3 ...).
+--                   UNIQUE(file_id, revision_no)로 파일별 중복 방지.
+--                   → 9.1 "고유 버전 번호"의 DB 차원 보장.
+--   storage_key   : 실제 버전 파일 저장 위치. 코드는 이 컬럼으로만 파일을 읽고 쓴다.
+--                   versionId 문자열로 경로를 추론해서는 안 됨.
+-- 03/18 - version_id 추가: 초단위 timestamp 충돌 방지 (legacy 비고)
 CREATE TABLE files_versions (
-    version_id  VARCHAR(512)    NOT NULL    COMMENT '버전 고유 ID (fileId.v{timestamp}_{counter})',
-    file_id     VARCHAR(255)    NOT NULL    COMMENT '파일 고유 ID',
-    user_id     VARCHAR(255)    NOT NULL    COMMENT '버전 생성자 ID',
-    `timestamp` BIGINT          NOT NULL    COMMENT '버전 생성 시각 (Unix timestamp, 초 단위)',
-    size        BIGINT UNSIGNED NOT NULL    COMMENT '파일 크기 (bytes)',
-    mimetype    VARCHAR(255)    NOT NULL    COMMENT 'MIME 타입 (예: application/pdf)',
-    metadata    JSON            DEFAULT NULL COMMENT '추가 메타데이터 (author, reason, DLP 필드 등)',
+    version_id   CHAR(36)      NOT NULL COMMENT '버전 고유 ID(UUID). 내부 식별자',
+    file_id      CHAR(36)      NOT NULL COMMENT '문서 고유 ID(UUID). documents.file_id 참조',
+    revision_no  BIGINT UNSIGNED NOT NULL COMMENT '파일별 사용자 표시 버전 번호 (1, 2, 3 ...)',
+    user_id      VARCHAR(255)  NOT NULL COMMENT '버전 생성자 ID',
+    `timestamp`  BIGINT        NOT NULL COMMENT '버전 생성 시각 (Unix epoch, 초 단위)',
+    size         BIGINT UNSIGNED NOT NULL COMMENT '파일 크기(bytes)',
+    mimetype     VARCHAR(255)  NOT NULL COMMENT 'MIME 타입',
+    storage_key  VARCHAR(512)  NOT NULL COMMENT '실제 버전 파일 저장 위치 (예: objects/{fileId}/versions/{versionId})',
+    metadata     JSON          DEFAULT NULL COMMENT '추가 메타데이터 (author, dlp.*, 등)',
 
     PRIMARY KEY (version_id),
-    INDEX idx_file_timestamp (file_id, `timestamp` DESC)
+    UNIQUE INDEX uq_file_revision (file_id, revision_no),
+    INDEX idx_file_timestamp (file_id, `timestamp` DESC),
+    CONSTRAINT fk_versions_document
+        FOREIGN KEY (file_id) REFERENCES documents(file_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='파일 버전 스냅샷 (RD-SRS-9.1, 9.2)';
+COMMENT='파일 버전 관리 (RD-SRS-9.1, 9.2, 9.5, 9.10)';
 
 -- ============================================================
 -- 1-2. version_diffs: 버전 간 diff 결과 캐시 (RD-SRS-9.4)
 -- ============================================================
 -- 04/30 - Phase A-5: diff 결과 영속화
 --   목적: prepareVersionComparison 호출 시 매번 재계산하던 것을 캐시하여 응답 속도 향상
---   동작: onDocumentModified가 새 버전 생성 시 자동으로 (이전→현재) diff를 INSERT.
+--   동작: onDocumentModified가 새 버전 생성 시 자동으로 (이전→새) diff를 INSERT.
 --         prepareVersionComparison은 캐시 우선 조회, 없으면 계산 후 저장.
---   from_version_id 의미:
---     - "current"는 라이브 파일 (현재 파일 시스템의 실제 콘텐츠)을 의미
---     - 일반 versionId는 files_versions 테이블 참조 (FK 미설정: "current" 지원 위해)
+--
+-- 05/18 - ID 정책 개정 반영:
+--   - from_version_id / to_version_id 는 모두 UUID 문자열을 저장한다.
+--   - "current" 특수값 의존을 줄였다:
+--       기존: onDocumentModified가 to_version_id = "current"로 INSERT
+--             → 시간이 지나면 "current"가 다른 콘텐츠를 가리키게 되어 캐시 의미가 변질
+--       변경: onDocumentModified가 to_version_id = 새로 발급한 versionId(UUID)로 INSERT
+--             → 캐시 항목의 의미가 영구 고정 (동일 (from, to) 페어는 항상 동일 콘텐츠를 가리킴)
+--   - prepareVersionComparison이 호출자에게서 "current"를 받으면
+--     documents.current_version_id를 조회해 즉시 구체 versionId로 변환 후 사용/저장.
+--   - 따라서 본 테이블에 "current" 문자열이 새로 INSERT되는 일은 발생하지 않는다.
+--     (과거 데이터 마이그레이션 시에만 "current" 값이 존재할 수 있음 → 의사코드 단계에선 신경 X)
+--
+--   타입 적합성:
+--     UUID는 36자, "current"는 7자 → 36자 이상 컬럼이면 모두 수용.
+--     기존 VARCHAR(512)은 과한 폭이지만 호환성 위해 유지.
+--     실 운영에선 CHAR(36) 또는 VARCHAR(64)로 축소 검토 가능.
+--
+--   FK 미설정 이유:
+--     - 마이그레이션 단계에서 "current" 특수값이 남아 있을 수 있음
+--     - diff 캐시는 본질적으로 "버전이 삭제되면 캐시도 가비지 컬렉션" 모델이 자연스러움
+--       (INSERT IGNORE + 주기적 정리 잡으로 충분, FK CASCADE보다 단순)
 -- 코드 참조:
---   onDocumentModified         → INSERT (from=versionId(=수정 전 백업), to="current")
+--   onDocumentModified         → INSERT (from=previousVersionId, to=새 versionId)  -- 모두 UUID
 --   prepareVersionComparison   → SELECT (캐시 hit 시), INSERT (캐시 miss 시 계산 후 저장)
 --   getVersionDiff             → SELECT 단일 (UI에서 직접 diff 조회)
 CREATE TABLE version_diffs (
     id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'diff 캐시 고유 ID',
-    file_id         VARCHAR(255)    NOT NULL    COMMENT '대상 파일 ID',
-    from_version_id VARCHAR(512)    NOT NULL    COMMENT '시작 버전 ID ("current" 가능)',
-    to_version_id   VARCHAR(512)    NOT NULL    COMMENT '끝 버전 ID ("current" 가능)',
+    file_id         VARCHAR(255)    NOT NULL    COMMENT '대상 파일 ID (UUID, documents.file_id)',
+    from_version_id VARCHAR(64)     NOT NULL    COMMENT '시작 버전 ID (UUID). 레거시 "current" 호환',
+    to_version_id   VARCHAR(64)     NOT NULL    COMMENT '끝 버전 ID (UUID). 레거시 "current" 호환',
     diff_method     VARCHAR(16)     NOT NULL    COMMENT '계산 방식: myers | sha256 | binary',
     added_lines     INT             NOT NULL    DEFAULT 0 COMMENT '추가된 라인 수',
     deleted_lines   INT             NOT NULL    DEFAULT 0 COMMENT '삭제된 라인 수',
@@ -222,7 +296,7 @@ COMMENT='승인자 등록 (RD-SRS-9.7)';
 CREATE TABLE approval_activity (
     id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '이력 고유 ID',
     rule_id     VARCHAR(255)    NOT NULL    COMMENT '규칙 ID (approval_rules.id 참조)',
-    user_id     VARCHAR(255)    NOT NULL    COMMENT '승인/거절 수행자 ID',
+    user_id     VARCHAR(255)    NOT NULL    COMMENT '승인 판정의 기준이 되는 승인자 ID (effective approver). 위임 승인 시 실제 수행자가 아닌 원래 승인자를 저장. 실제 수행자(actual actor)는 comment에 기록. 전환 시 actual_user_id/effective_approver_id 컬럼 분리 권장.',
     action      VARCHAR(64)     NOT NULL    COMMENT '액션 태그 (approved / rejected / cancelled)',
     `timestamp` BIGINT          NOT NULL    COMMENT '수행 시각 (Unix timestamp)',
     comment     TEXT            DEFAULT NULL COMMENT '승인/거절 사유',
@@ -230,6 +304,10 @@ CREATE TABLE approval_activity (
     PRIMARY KEY (id),
     INDEX idx_rule (rule_id),
     INDEX idx_user_action (user_id, action),
+    -- 한 rule에서 한 effective approver는 한 번만 결정 가능 (중복 결정 DB 차원 방지)
+    -- user_id = effective approver 기준 (위임 승인 시 원래 승인자 ID)
+    -- [전환 시] effective_approver_id 컬럼 분리 후 UNIQUE(rule_id, effective_approver_id)로 변경
+    UNIQUE INDEX uq_rule_user_decision (rule_id, user_id),
     CONSTRAINT fk_activity_rule FOREIGN KEY (rule_id) REFERENCES approval_rules(id)
         ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -474,7 +552,10 @@ COMMENT='사용자 역할 (RD-SRS-9.6/9.10 권한 체크)';
 --     활성 위임(expires_at IS NULL OR expires_at > now)이 있고 위임자가 승인자이면 통과
 --   주의:
 --     - 같은 위임자가 여러 명에게 동시 위임 가능 (delegator → delegate1, delegate2)
---     - delegate가 결정하면 approval_activity에 본인 user_id로 기록되되, 위임 정보도 함께
+--     - delegate(피위임자)가 결정하면 approval_activity.user_id에는 delegator(원래 승인자)를 기록
+--       실제 수행자(delegate)는 comment에 "[actual actor {delegate}, delegated for {delegator}]" 형식으로 기록
+--       이렇게 해야 SEQUENTIAL 순서 체크가 원래 승인자 기준으로 정상 동작함
+--       (전환 시: actual_user_id / effective_approver_id 컬럼 분리로 근본 해결 권장)
 --   감사 추적: 결정 시점에 활성 위임이 있었는지 approval_activity의 comment에 함께 기록
 -- 코드 참조:
 --   createDelegation     → INSERT (delegator_id, delegate_id, expires_at, reason)

@@ -36,6 +36,10 @@ public class DemoRequests {
         @NotBlank private String fileId;
         private String comment = "";
         @NotEmpty private List<String> approvers;
+        // 05/15: 합의 모드 매개변수 (THRESHOLD, UNANIMOUS, SEQUENTIAL)
+        private String consensusMode = "THRESHOLD";
+        // THRESHOLD 모드에서만 의미. UNANIMOUS/SEQUENTIAL는 자동으로 approvers 크기로 정규화
+        private int requiredApprovals = 1;
     }
 
     @Data
@@ -43,6 +47,16 @@ public class DemoRequests {
         @NotBlank private String userId;
         @NotBlank private String fileId;
         @NotNull private ApprovalAction action;
+        private String comment = "";
+    }
+
+    /**
+     * 05/15: CANCEL 액션용 DTO (시나리오 4).
+     */
+    @Data
+    public static class CancelApprovalRequest {
+        @NotBlank private String userId;
+        @NotBlank private String fileId;
         private String comment = "";
     }
 }
