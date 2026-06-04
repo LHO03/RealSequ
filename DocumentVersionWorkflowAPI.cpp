@@ -15,9 +15,9 @@
 #include <sstream>   // std::istringstream, std::ostringstream 사용을 위해
 #include <numeric>   // std::accumulate 사용을 위해 (해시 등)
 #include <functional> // std::hash, std::function 사용을 위해
-#include <unordered_set> // 03/05 - 삭제 대상 중복 체크 O(1)을 위해
-#include <unordered_map> // 05/18 - applyVersionRetentionPolicy의 versionId→storage_key 매핑용
-#include <iomanip>       // 03/13 - std::setfill, std::setw (SHA-256 hex 출력용)
+#include <unordered_set> // 삭제 대상 중복 체크 O(1)을 위해
+#include <unordered_map> // applyVersionRetentionPolicy의 versionId→storage_key 매핑용
+#include <iomanip>       // std::setfill, std::setw (SHA-256 hex 출력용)
 #include <cstring>       // memset (DatabaseConnection Prepared Statement 바인딩용)
 #include <fstream>       // FileStorage 로컬 파일 I/O용
 #include <filesystem>    // FileStorage 디렉터리 생성용 (C++17)
@@ -32,7 +32,7 @@
 struct FileContent {
     std::vector<uint8_t> data;
     std::string mimeType;
-    // 03/13 - size 멤버 변수를 메서드로 변환
+    // size 멤버 변수를 메서드로 변환
     // 이유: data를 resize한 뒤 size를 갱신하지 않으면 DB에 잘못된 크기가 기록됨
     //       size() 메서드는 항상 data.size()를 반환하므로 불일치 불가
     // 변경 영향: content.size → content.size() (6곳)
@@ -40,7 +40,7 @@ struct FileContent {
 };
 
 // 버전 레코드 정보
-// 05/18 - UUID + revision_no + storage_key 구조로 보강
+// UUID + revision_no + storage_key 구조로 보강
 //   기존: versionId 하나가 "내부 식별자 + 사용자 표시 + 저장 위치"를 모두 의미
 //   변경: 세 가지 역할을 별도 필드로 분리
 //     - versionId   : 내부 식별자 (UUID). 외부 노출/FK용. 의미 없음(=보안상 좋은 성질)
@@ -80,15 +80,14 @@ struct ActivityEntry {
     std::optional<std::string> reason;  // 변경 이유 (커스텀 필드)
 };
 
-
-// 03/18 - DiffService 관련 코드를 헤더 파일로 분리
+// DiffService 관련 코드를 헤더 파일로 분리
 // DiffLineType, DiffLine, DiffHunk, DiffMethod, DiffResult,
 // DocumentType, DocumentTextExtractor, DiffService 클래스가 포함됨
 // 주의: FileContent 구조체가 위에 정의된 후에 include해야 함
 #include "Diffservice.h"
 
 // 버전 비교용 콘텐츠 쌍
-// 02/11 - DiffResult 필드 추가: 서버 측에서 계산된 diff 결과를 포함
+// DiffResult 필드 추가: 서버 측에서 계산된 diff 결과를 포함
 struct DiffInfo {
     std::string versionId1; // 비교 대상 버전 1
     std::string versionId2; // 비교 대상 버전 2
@@ -110,13 +109,13 @@ enum class ApprovalAction {
     REQUEST,        // 승인 요청
     APPROVE,        // 승인
     REJECT,         // 승인 거절
-    CANCEL          // 04/30 - Phase A-7: 승인 요청 취소 (요청자/승인자/관리자)
+    CANCEL          // Phase A-7: 승인 요청 취소 (요청자/승인자/관리자)
                     // REJECT와의 차이:
                     //   - REJECT: "검토했고 부적합" → 거절 사유와 함께 이력 보존
                     //   - CANCEL: "이 요청 자체가 무효, 처리 안 함" → 행정적 무효화
 };
 
-// 05/06 - Phase A-9: 다수 승인자 합의 모델 (결정 ① D 채택)
+// 다수 승인자 합의 모델 (결정 ① D 채택)
 //   THRESHOLD : "M of N" 모델. 임계값(required_approvals) 도달 시 승인.
 //               한 명이라도 임계값 도달 불가능한 거절 발생 시 즉시 거절.
 //   UNANIMOUS : 만장일치. 전체 승인자가 모두 APPROVE해야 승인.
@@ -130,10 +129,8 @@ enum class ApprovalConsensusMode {
     SEQUENTIAL
 };
 
-// 03/18 - 알림 채널 enum 전환 (GPT 리뷰 반영)
-//   변경 전: std::vector<std::string> + "push"/"email"/"web" 문자열 비교
+// 알림 채널 enum 전환
 //   문제: 오타를 컴파일러가 못 잡음, 타입 안정성 없음
-//   변경 후: enum class NotificationChannel + switch 분기
 enum class NotificationChannel {
     PUSH,
     EMAIL,
@@ -153,7 +150,7 @@ struct RetentionPolicy {
     int maxVersions = 0;       // 최대 버전 수 (0 = 무제한)
 };
 
-// 05/06 - Phase A-10: 보존 정책 적용 범위 (결정 ① C 채택)
+// 보존 정책 적용 범위 (결정 ① C 채택)
 //   GLOBAL : 시스템 전체 기본값 (모든 파일)
 //   USER   : 특정 사용자의 모든 파일
 //   FOLDER : 특정 폴더 안의 파일들
@@ -166,7 +163,7 @@ enum class RetentionPolicyScope {
     FILE
 };
 
-// 05/06 - Phase A-8 (결정 ⑥): 상태 전이 매트릭스 커스터마이징 설정
+// (결정 ⑥): 상태 전이 매트릭스 커스터마이징 설정
 //   목적: 기본 매트릭스를 도입 기업 정책에 맞게 오버라이드 가능하도록 분리
 //   동작: isValidTransition이 이 객체에서 매트릭스를 조회. 객체 미주입 시 기본값 사용.
 //   확장 포인트: setTransitionMatrix() 호출로 런타임 변경 가능
@@ -195,6 +192,26 @@ struct StateTransitionConfig {
 };
 
 // ============================================================
+// RD-SRS-9.3: 통합 변경 이력 엔트리 구조체
+// ------------------------------------------------------------
+// getDocumentHistory()의 반환 타입.
+// files_versions, activity, approval_activity 세 소스에서 수집한
+// 변경 이력을 통일된 형태로 표현한다.
+// [Java 전환 시] DocumentHistoryDto 또는 HistoryEntry 레코드 클래스로 변환.
+// ============================================================
+struct HistoryEntry {
+    std::string source;      // 이력 출처: "versions" | "activity" | "approval"
+    std::string userId;      // 변경 수행자 ID
+    int64_t     timestamp;   // Unix timestamp (초 단위)
+    std::string action;      // 변경 유형: "version_created", "version_updated",
+                             //            "status_changed", "approval_approved" 등
+    std::string revisionNo;  // 버전 번호 (versions 소스일 때만, 그 외 "")
+    std::string versionId;   // 버전 UUID (versions/activity 소스, 그 외 "")
+    std::string summary;     // 변경 내용 요약 (diff summary 또는 action 설명)
+    std::string reason;      // 변경 사유 (입력된 경우만, 그 외 "")
+};
+
+// ============================================================
 // Prototype Dependency Stubs
 // ============================================================
 // 아래 클래스들은 C++ 프로토타입에서 실제 구현을 생략한 외부 의존성이다.
@@ -202,7 +219,6 @@ struct StateTransitionConfig {
 // 알림 대상 계산, 보존 정책 등 핵심 비즈니스 흐름을 검증하는 것이며,
 // DB 연결, 파일 저장소, 알림 발송, 감사 로그 저장 같은 인프라 구현은
 // Java/Spring 전환 단계에서 별도 계층으로 구현한다.
-//
 // Java 전환 시 예상 분리:
 // - DatabaseConnection     → Repository / JdbcTemplate / JPA
 // - FileStorage            → FileStorage 인터페이스 + 구현체
@@ -212,7 +228,6 @@ struct StateTransitionConfig {
 // - VersionService         → DocumentVersionService
 // - DocumentStatusManager  → DocumentStatusService
 // - PolicyManager          → RetentionPolicyService
-//
 // 주의:
 // 현재 stub 메서드는 실제 부작용(side effect)을 수행하지 않는다.
 // 따라서 C++ 단계의 실행 결과는 실제 DB/파일/알림 동작을 검증하지 못하며,
@@ -223,13 +238,11 @@ struct StateTransitionConfig {
 // Prototype stub:
 //   외부 의존성을 표현하기 위한 자리표시자. 메서드는 실제 부작용을 수행하지 않으며,
 //   호출 흐름과 의존성 구조를 보여주기 위한 용도다.
-//
 // [현재 상태]
 // C++ 프로토타입에서는 실제 구현하지 않은 stub 클래스.
 // 현재 버전 생성/수정/조회/삭제 로직은 DocumentVersionWorkflowAPI 내부의
 // createInitialVersion(), onDocumentModified(), getVersionsAtTime(),
 // deleteVersion(), applyVersionRetentionPolicy() 등에 직접 작성되어 있음.
-//
 // [역할]
 // Java/Spring 전환 시 문서 버전 관리 비즈니스 로직을 담당할 Service 계층.
 // - 최초 버전 생성
@@ -237,7 +250,6 @@ struct StateTransitionConfig {
 // - 특정 시점 버전 조회
 // - 버전 삭제
 // - 버전 보존 정책 적용
-//
 // [Java 전환 시]
 // DocumentVersionService 또는 VersionService로 분리하고,
 // Controller는 이 서비스를 호출하며,
@@ -249,11 +261,9 @@ class VersionService {};
 // Prototype stub:
 //   감사 로그 기록 시점을 표시하기 위한 자리표시자. 실제 로그 저장은 수행하지 않으며,
 //   호출 흐름과 의존성 구조를 보여주기 위한 용도다.
-//
 // [현재 상태]
 // C++ 프로토타입에서는 실제 로그 저장을 수행하지 않는 stub.
 // logActivity()는 호출 위치를 표시하기 위한 no-op 메서드임.
-//
 // [역할]
 // 사용자/관리자의 주요 행위를 감사 로그로 기록하는 서비스.
 // 예:
@@ -263,11 +273,9 @@ class VersionService {};
 // - 승인 요청/승인/거절
 // - 정책 생성/수정/삭제
 // - 알림 발송 실패
-//
 // [DB 연동]
 // Java 전환 시 activity 테이블 또는 별도의 admin_audit_log 테이블에 기록.
 // 현재 Schema.sql의 activity 테이블과 연결될 예정.
-//
 // [Java 전환 시]
 // AuditLogService.record(...)
 // AuditLogRepository.insert(...)
@@ -279,13 +287,11 @@ class DatabaseConnection;
 // ------------------------------------------------------------
 // activity 테이블에 감사 로그를 실제로 INSERT하는 구현체.
 // DatabaseConnection을 주입받아 동작한다.
-//
 // 파라미터:
 //   userId   - 활동 수행자 ID
 //   fileId   - 대상 파일 ID (파일과 무관한 활동이면 빈 문자열)
 //   action   - 활동 유형 (예: "version_created", "status_changed")
 //   message  - 활동 상세 메시지
-//
 // [전환 시]
 // 별도 AuditLogService 빈으로 분리하고,
 // AOP 또는 이벤트 리스너를 통해 자동 기록하도록 확장 가능.
@@ -307,13 +313,11 @@ public:
 // Prototype stub:
 //   문서 상태 관리 의존성을 표현하기 위한 자리표시자. 실제 상태 저장은 수행하지 않으며,
 //   호출 흐름과 의존성 구조를 보여주기 위한 용도다.
-//
 // [현재 상태]
 // C++ 프로토타입에서는 구현하지 않은 stub.
 // 현재 문서 상태 관리는 DocumentVersionWorkflowAPI 내부의
 // setDocumentStatus(), getCurrentStatusTag(), isValidTransition()
 // 메서드가 직접 처리하고 있음.
-//
 // [역할]
 // 문서의 상태값을 관리하는 서비스.
 // 상태 예:
@@ -322,10 +326,8 @@ public:
 // - approved
 // - rejected
 // - deprecated
-//
 // [관련 요구사항]
 // RD-SRS-9.6: 문서 상태(초안, 검토 중, 승인됨, 폐기됨 등) 관리.
-//
 // [Java 전환 시]
 // DocumentStatusService로 분리하고,
 // 상태 전이 검증은 StateTransitionPolicy 또는 StateTransitionConfig로 분리.
@@ -337,21 +339,17 @@ class DocumentStatusManager {};
 // Prototype stub:
 //   이벤트 디스패치/룰 평가 의존성을 표현하기 위한 자리표시자. 실제 이벤트 처리나
 //   룰 평가는 수행하지 않으며, 호출 흐름과 의존성 구조를 보여주기 위한 용도다.
-//
 // [현재 상태]
 // C++ 프로토타입에서는 실제 이벤트 처리/룰 평가를 수행하지 않는 stub.
 // dispatchEvent(), evaluateRules()는 이벤트 발생 지점을 표시하기 위한 no-op 메서드임.
-//
 // [역할]
 // 문서 변경, 상태 변경, 승인 완료 등의 이벤트를 받아
 // 사전에 정의된 워크플로우 규칙을 평가하고 후속 작업을 실행한다.
-//
 // 예:
 // - version_updated 이벤트 발생 시 이해관계자 알림
 // - tag_assigned 이벤트 발생 시 상태별 정책 적용
 // - document_approved 이벤트 발생 시 문서 상태 approved 전환
 // - document_rejected 이벤트 발생 시 요청자에게 재작업 알림
-//
 // [Java 전환 시]
 // Spring ApplicationEventPublisher + @EventListener,
 // 또는 별도 WorkflowService/RuleEngine으로 구현.
@@ -359,7 +357,6 @@ class DocumentStatusManager {};
 // WorkflowEngine
 // ------------------------------------------------------------
 // Observer 패턴 기반 이벤트 디스패치 구현체.
-//
 // 사용 방법:
 //   // 리스너 등록
 //   workflowEngine->on("version_updated", [](auto& event, auto& data) {
@@ -367,13 +364,11 @@ class DocumentStatusManager {};
 //   });
 //   // 이벤트 발행
 //   workflowEngine->dispatchEvent("version_updated", {{"fileId", id}});
-//
 // 이벤트 종류:
 //   - "version_updated"    : 버전 생성/수정 완료 → 알림 트리거
 //   - "file_activity"      : 감사 로그 연동 이벤트
 //   - "tag_assigned"       : 상태 태그 변경 → 정책 평가 트리거
 //   - "document_approved"  : 승인 완료 → 후속 워크플로우 처리
-//
 // [전환 시]
 // 이벤트 발행 메커니즘(ApplicationEventPublisher 등)으로 대체.
 // dispatchEvent / evaluateRules 호출부는 변경 불필요.
@@ -417,19 +412,16 @@ private:
 // Prototype stub:
 //   알림 발송 채널(이메일/푸시/웹) 의존성을 표현하기 위한 자리표시자. 실제 발송은
 //   수행하지 않으며, 호출 흐름과 의존성 구조를 보여주기 위한 용도다.
-//
 // [현재 상태]
 // C++ 프로토타입에서는 실제 이메일/푸시/웹 알림 발송을 수행하지 않는 stub.
 // 현재 알림 대상 계산, 중복 방지, Outbox 저장 등은
 // DocumentVersionWorkflowAPI 내부의 notifyStakeholders(),
 // enqueueOutbox(), processOutboxQueue(), attemptDelivery()에 작성되어 있음.
-//
 // [역할]
 // 실제 알림 채널로 메시지를 발송하는 외부 어댑터.
 // - WEB: DB notifications 테이블에 저장
 // - EMAIL: SMTP 또는 외부 메일 API 연동
 // - PUSH: 모바일/데스크톱 푸시 토큰 기반 발송
-//
 // [Java 전환 시]
 // NotificationService는 알림 비즈니스 로직,
 // NotificationSender는 채널별 발송 어댑터로 분리하는 것이 바람직함.
@@ -450,25 +442,21 @@ public:
 //   보존 정책 적용 위치를 표시하기 위한 자리표시자. 실제 정책 적용은
 //   DocumentVersionWorkflowAPI::applyVersionRetentionPolicy()가 담당하며,
 //   본 클래스의 메서드는 호환성 유지를 위한 no-op이다.
-//
 // [현재 상태]
 // C++ 프로토타입 초기에 보존 정책 적용 위치를 표시하기 위해 만든 stub.
 // 현재 실제 보존 정책 로직은 DocumentVersionWorkflowAPI 내부의
 // createRetentionPolicy(), evaluatePolicy(),
 // applyVersionRetentionPolicy(), applyToAllFiles() 등에 구현되어 있음.
-//
 // [역할]
 // 버전 보존 정책을 평가하고 오래된 버전을 정리하는 서비스.
 // - 최대 보관 일수
 // - 최소 보관 일수
 // - 최대 버전 수
 // - 파일/폴더/사용자/전역 정책 우선순위
-//
 // [Java 전환 시]
 // RetentionPolicyService 또는 PolicyService로 분리.
 // @Scheduled 작업으로 주기적 정리 수행.
 // DB 접근은 retention_policies Repository에서 처리.
-//
 // [주의]
 // 현재 applyRetentionPolicy() stub은 실제 정리 작업을 수행하지 않으므로,
 // C++ 프로토타입에서는 applyVersionRetentionPolicy()가 실질적인 구현이다.
@@ -484,24 +472,20 @@ public:
 //   자리표시자. 실제 파일 I/O는 수행하지 않으며, createInitialVersion(),
 //   onDocumentModified() 등의 호출 흐름과 storage_key 기반 경로 규약을 검증하기
 //   위한 용도다.
-//
 // [현재 상태]
 // C++ 프로토타입에서는 실제 파일 I/O를 수행하지 않는 stub.
 // 버전 생성/수정/복원 흐름을 검증하기 위해 메서드 시그니처만 제공한다.
-//
 // [역할]
 // 중앙화 문서 저장소에 파일을 저장, 조회, 복사, 삭제하는 어댑터.
 // - 원본 파일 저장
 // - 버전 스냅샷 저장
 // - 특정 버전 파일 읽기
 // - 오래된 버전 파일 삭제
-//
 // [실제 구현 시 고려사항]
 // - 로컬 파일시스템, Nextcloud WebDAV, S3, NAS, 암호화 저장소 중 선택 필요
 // - 파일 저장과 DB 저장 간 정합성 보장 필요
 // - 임시 파일 저장 후 commit/rollback 유사 처리 필요
 // - 민감 문서의 경우 저장 시 암호화 필요
-//
 // [Java 전환 시]
 // FileStorage 인터페이스를 만들고 구현체를 분리.
 // 예:
@@ -513,15 +497,12 @@ public:
 // ------------------------------------------------------------
 // 로컬 파일시스템 기반 파일 I/O 구현체 (fstream + C++17 filesystem).
 // storage_key를 상대 경로로 해석하여 BASE_PATH 아래에 저장한다.
-//
 // [저장 경로 규약]
 //   BASE_PATH / objects / {fileId} / versions / {versionId}
 //   예: ./storage/objects/abc-123/versions/def-456
-//
 // [배포 환경 설정]
 //   BASE_PATH를 실제 저장 경로로 변경할 것.
 //   프로토타입에서는 실행 디렉터리 기준 "./storage"를 기본값으로 사용.
-//
 // [전환 시]
 // FileStorage 인터페이스를 유지한 채 WebDAV / S3 / NAS 구현체로 교체.
 // 비즈니스 로직의 fileStorage->writeFile/readFile 호출부는 변경 불필요.
@@ -535,7 +516,7 @@ public:
         return BASE_PATH + "/" + storageKey;
     }
 
-    // 05/18 - Deprecated: filePath 기반 fileId 생성.
+    // Deprecated: filePath 기반 fileId 생성.
     //   새 흐름에서는 generateUUID()를 사용하므로 호출되지 않음.
     //   호환성을 위해 시그니처만 유지.
     std::string generateFileId(const std::string& p) { return "file_id_" + p; }
@@ -624,23 +605,19 @@ public:
 //   실제 DB에 접근하지 않으며, 호출 흐름·SQL 문법·바인딩 파라미터 구조를
 //   검증하기 위한 용도다. 실 운영에서는 connection pool과 트랜잭션 관리가
 //   추가되어야 한다.
-//
 // [현재 상태]
 // C++ 프로토타입에서는 실제 DB 연결을 수행하지 않는 stub.
 // SQL 문과 파라미터 구조를 검증하기 위한 용도이며,
 // execute()와 query()는 실제 MariaDB에 접근하지 않는다.
-//
 // [역할]
 // 문서 버전, 상태 태그, 승인 규칙, 알림, 감사 로그, 보존 정책 등
 // 모든 영속 데이터를 DB에 저장/조회하는 공통 데이터 접근 계층.
-//
 // [주의]
 // 현재 execute()는 항상 0을 반환하므로,
 // 영향받은 row 수를 기준으로 성공/실패를 판단하는 로직은
 // 실제 실행 결과와 다르게 동작할 수 있다.
 // 현재 query()는 항상 빈 결과를 반환하므로,
 // 조회 기반 로직은 프로토타입 실행만으로 검증하기 어렵다.
-//
 // [Java 전환 시]
 // Spring JdbcTemplate.update() / queryForList()
 // 또는 JPA Repository로 대체.
@@ -650,26 +627,22 @@ public:
 // ------------------------------------------------------------
 // MariaDB Connector/C 기반 실제 DB 연결 구현체.
 // Prepared Statement를 사용하므로 SQL Injection에 안전하다.
-//
 // [접속 정보 설정]
 // 아래 DB_HOST, DB_USER, DB_PASSWORD, DB_NAME 상수를 환경에 맞게 수정할 것.
 // 프로토타입 단계에서는 빈칸으로 두며, 실제 배포 시 환경 변수 또는 설정 파일로 주입.
-//
 // [빌드]
 // g++ -std=c++17 DocumentVersionWorkflowAPI.cpp -lmariadb -lstdc++fs -o prototype
-//
 // [전환 시]
 // 이 클래스 전체를 DB 접근 라이브러리(JdbcTemplate 등)로 대체한다.
 // 비즈니스 로직(db->execute / db->query 호출부)은 변경 불필요.
 class DatabaseConnection {
 public:
-    // ── 접속 정보 (배포 환경에 맞게 수정) ──────────────────────
+    // ── 접속 정보 (배포 환경에 맞게 수정)
     static constexpr const char* DB_HOST     = "";   // 예: "127.0.0.1"
     static constexpr const char* DB_USER     = "";   // 예: "nextcloud"
     static constexpr const char* DB_PASSWORD = "";   // 예: "password"
     static constexpr const char* DB_NAME     = "";   // 예: "nextcloud"
     static constexpr unsigned int DB_PORT    = 3306;
-    // ────────────────────────────────────────────────────────────
 
     DatabaseConnection() {
         conn_ = mysql_init(nullptr);
@@ -701,7 +674,7 @@ public:
     }
 
     // INSERT / UPDATE / DELETE 실행. affected rows 반환.
-    // 04/30 - Phase A-2: 반환 타입 void → int (영향받은 row 수)
+    // 반환 타입 void → int (영향받은 row 수)
     // 전환 시: DB 접근 라이브러리의 update() 메서드와 동일한 의미
     int execute(const std::string& sql,
                 const std::vector<std::string>& params) {
@@ -868,7 +841,7 @@ public:
         return rows;
     }
 
-    // ── 트랜잭션 제어 ────────────────────────────────────────
+    // ── 트랜잭션 제어
     // 여러 SQL을 하나의 원자적 작업으로 묶을 때 사용.
     // 직접 호출보다는 아래 TransactionGuard를 사용하는 것이 안전하다.
     void beginTransaction() { execute("START TRANSACTION", {}); }
@@ -894,13 +867,11 @@ private:
     }
 };
 
-
 // ============================================================
 // TransactionGuard
 // ------------------------------------------------------------
 // RAII 방식으로 트랜잭션을 관리한다.
 // 스코프를 벗어날 때 commit()이 호출되지 않았으면 자동으로 rollback.
-//
 // 사용 예:
 //   {
 //       TransactionGuard tx(*db);
@@ -908,7 +879,6 @@ private:
 //       db->execute("UPDATE ...", {...});
 //       tx.commit(); // 여기까지 도달해야 커밋
 //   }  // 예외 발생 또는 commit 미호출 시 소멸자에서 rollback
-//
 // [전환 시] @Transactional 어노테이션으로 대체
 // ============================================================
 class TransactionGuard {
@@ -988,10 +958,8 @@ private:
 
 public:
     // 생성자: 각 컴포넌트를 초기화하고 이벤트 리스너를 등록한다.
-    //
     // DB 접속 정보는 DatabaseConnection::DB_HOST 등 상수로 관리.
     // FileStorage 저장 경로는 FileStorage::BASE_PATH로 관리.
-    //
     // [전환 시] 의존성 주입(DI)으로 각 컴포넌트를 외부에서 주입받도록 변경.
     DocumentVersionWorkflowAPI() {
         // DB 연결 (접속 정보: DatabaseConnection 상수 참조)
@@ -1010,7 +978,7 @@ public:
         fileStorage         = std::make_unique<FileStorage>();
         diffService         = std::make_unique<DiffService>();
 
-        // ── 이벤트 리스너 등록 ──────────────────────────────
+        // ── 이벤트 리스너 등록
         // "version_updated": 버전 생성/수정 완료 → 알림 트리거
         workflowEngine->on("version_updated",
             [this](const std::string&, const WorkflowEngine::EventData& data) {
@@ -1032,7 +1000,6 @@ public:
                 std::string message = (msgIt != data.end()) ? msgIt->second : "문서가 승인되었습니다.";
                 notifyStakeholders(fileIt->second, "document_approved", message, {});
             });
-        // ────────────────────────────────────────────────────
     }
 
     // 소멸자: unique_ptr이 선언 역순으로 자동 해제하므로 명시적 delete 불필요.
@@ -1046,7 +1013,7 @@ public:
 
 private:
 
-    // 03/05 - 태그 이름 상수 정의 (하드코딩 방지)
+    // 태그 이름 상수 정의 (하드코딩 방지)
     // setDocumentStatus, processApprovalWorkflow 등에서 공통 사용
     // 태그 이름 변경 시 이곳만 수정하면 전체 반영
     static constexpr const char* TAG_DRAFT = "draft";
@@ -1057,12 +1024,8 @@ private:
 
 public:
     // RD-SRS-9.1: 모든 문서는 고유한 버전 번호를 가져야 함
-    // code: apps/files_versions/lib/Storage.php (store),
-    //       apps/files_versions/lib/Versions/IVersion.php (getRevisionId)
-    //       apps/files_versions/lib/Db/VersionEntity.php
     // 클라이언트에서 호출되는 부분: WebDAV PUT /remote.php/dav/files/{user}/{path}
-    //
-    // 05/18 - ID 생성 정책 전면 개정:
+    // ID 생성 정책 전면 개정:
     //   [기존 문제]
     //     fileId = "file_id_" + filePath           → 경로 변경 시 동일 문서 추적 불가
     //     versionId = fileId + ".v{ts}_{cnt}"      → fileId·timestamp·counter에 모두 종속,
@@ -1074,15 +1037,7 @@ public:
     //     revisionNo  = 1, 2, 3 ...                → 사용자에게 보이는 버전 번호
     //     storageKey  = "objects/{fileId}/versions/{versionId}"
     //                                              → 실제 저장 위치, versionId 문자열로 경로 추론 X
-    //
-    // TODO(Transaction/Consistency):
-    //   현재 C++ 프로토타입에서는 파일 저장과 DB INSERT/UPDATE가 원자적으로 묶여 있지 않다.
-    //   파일 저장은 성공했지만 DB 기록이 실패하면 orphan file이 생길 수 있고,
-    //   DB 기록은 성공했지만 파일 저장이 실패하면 orphan DB record가 생길 수 있다.
-    //   실제 구현에서는 임시 저장 경로, 상태값(PENDING/ACTIVE), 보상 삭제,
-    //   DB 트랜잭션 등을 사용해 파일 저장소와 DB의 정합성을 보장해야 한다.
-    //   [Java 전환 시] @Transactional + 파일 저장 실패 시 보상 콜백,
-    //                  또는 documents.status='PENDING' → 파일/버전 INSERT 성공 후 'ACTIVE' 전이
+    // [Java 전환 시] @Transactional + PENDING→ACTIVE 상태 전이로 파일-DB 정합성 보장
     VersionInfo createInitialVersion(const std::string& userId,
                                     const std::string& filePath,
                                     const FileContent& content) {
@@ -1095,8 +1050,8 @@ public:
         long long revisionNo = 1;  // 최초 버전은 항상 1
 
         // 2. 생성 시각
-        // 02/10 - timestamp 문제: 초 단위로 통일
-        // 05/18 - 더 이상 versionId 생성에 사용되지 않음. DB 컬럼 값으로만 사용.
+        // timestamp 문제: 초 단위로 통일
+        // 더 이상 versionId 생성에 사용되지 않음. DB 컬럼 값으로만 사용.
         auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()
         ).count();
@@ -1145,7 +1100,6 @@ public:
         //    05/18 신규: 문서의 평생 식별자(file_id)와 사용자 표시 경로를 documents에 등록.
         //    이후 파일 이동/이름변경은 documents.current_path만 UPDATE하고
         //    file_id는 절대 바뀌지 않음 → 같은 문서 추적이 보장됨.
-        //
         // TODO(FileMoveRename):
         //   현재 의사코드에는 파일 이동/이름변경 메서드(예: renameDocument, moveDocument)가
         //   구현되어 있지 않다. 향후 추가 시 반드시 다음 원칙을 지킬 것:
@@ -1156,7 +1110,6 @@ public:
         //     - file_id 기반 모든 FK(files_versions, version_diffs, systemtag_object_mapping,
         //       approval_rules, file_subscriptions, notifications, retention_policies)는
         //       자연스럽게 그대로 유지됨
-        //
         //    original_name은 filePath의 마지막 세그먼트로 두는 것이 통상적이나,
         //    경로 파싱은 의사코드 범위 밖이므로 filePath 전체를 일단 보관.
         //    실 운영에서는 std::filesystem::path / Spring StringUtils 등으로 분리.
@@ -1208,6 +1161,15 @@ public:
         auditLog->logActivity(userId, fileId, "version_created",
                               "Initial version (revision_no=1)");
 
+        // RD-SRS-9.3: activity 테이블에 버전 생성 이력 기록
+        //   변경자(userId), 변경일시(timestamp), versionId를 subjectparams에 포함하여 저장.
+        //   기존 auditLog->logActivity()는 별도 audit trail 용도이며,
+        //   logDocumentChangeHistory()는 Nextcloud activity 테이블 기록 전용.
+        //   versionId를 전달함으로써 files_versions.metadata의 $.reason 갱신도 가능.
+        logDocumentChangeHistory(userId, fileId, "version_created",
+                                 "revision_no=1",
+                                 std::make_optional(versionId));
+
         // 9. 알림 발송 (commit 이후 후처리 — 실패해도 버전 생성은 완료됨)
         // onDocumentModified()와 동일한 후처리 분리 패턴 적용
         // [전환 시] VersionCreatedEvent 발행 → @EventListener가 비동기 처리
@@ -1221,15 +1183,11 @@ public:
 
         return version;
     }
-    // 05/18 - 트랜잭션 한계는 본 메서드 상단 TODO(Transaction/Consistency) 참조.
+    // 트랜잭션 한계는 본 메서드 상단 TODO(Transaction/Consistency) 참조.
 
     // RD-SRS-9.2: 문서 수정 시 버전이 자동으로 업데이트되어야 함
-    // code: apps/files_versions/lib/Listener/FileEventsListener.php
-    //       apps/files_versions/lib/Events/CreateVersionEvent.php
-    //       apps/files_versions/lib/Storage.php (store)
     // Triggered by: NodeWrittenEvent from file modification
-    //
-    // 05/18 - ID 생성 정책 개정 반영:
+    // ID 생성 정책 개정 반영:
     //   [입력] fileId는 이제 UUID라고 가정한다 (createInitialVersion에서 발급된 문서 평생 ID).
     //          호출자는 documents.file_id를 그대로 넘겨야 한다.
     //   [흐름 변경]
@@ -1237,24 +1195,19 @@ public:
     //     - 새 버전의 revisionNo는 documents.current_revision_no + 1
     //     - 스냅샷 저장 경로는 storage_key = "objects/{fileId}/versions/{versionId}"
     //     - documents 테이블의 current_version_id / current_revision_no / updated_at 동시 UPDATE
-    //
     // TODO:
     //   실제 구현에서는 documents 행을 SELECT ... FOR UPDATE 등으로 잠가
     //   동시에 같은 문서가 수정될 때 revision_no가 중복되지 않도록 해야 한다.
     //   현 의사코드의 DB는 stub이므로 락 동작은 표현되지 않으며,
     //   대신 files_versions.uq_file_revision(file_id, revision_no) UNIQUE 제약이
     //   마지막 방어선으로 작용한다 (중복 INSERT 시 DB가 거부).
-    //
     // TODO(Transaction/Consistency):
     //   현재 C++ 프로토타입에서는 파일 저장과 DB INSERT/UPDATE가 원자적으로 묶여 있지 않다.
     //   파일 저장은 성공했지만 DB 기록이 실패하면 orphan file이 생길 수 있고,
     //   DB 기록은 성공했지만 파일 저장이 실패하면 orphan DB record가 생길 수 있다.
     //   실제 구현에서는 임시 저장 경로, 상태값(PENDING/ACTIVE), 보상 삭제,
     //   DB 트랜잭션 등을 사용해 파일 저장소와 DB의 정합성을 보장해야 한다.
-    //
-    // 문서 수정 이벤트가 발생했을 때 호출되는 버전 업데이트 처리 메서드
-    // 수정 전의 현재 파일 내용을 먼저 읽어 별도 버전 스냅샷으로 저장하고, 이후 원본 파일을 새 내용으로 갱신
-    // 사용자가 직접 버전을 만들지 않아도 수정 흐름 안에서 버전 생성이 자동으로 수행되도록 설계된 메서드
+
     // * 전체 흐름
     //   documents에서 현재 revision_no 조회
     // → 새 revision_no, 새 versionId, 새 storageKey 산출
@@ -1271,19 +1224,16 @@ public:
         // 2. documents에서 현재 라이브 상태 조회
         //    05/18 - 새 revision_no 발급을 위한 단조 증가 기준값과
         //            이전 버전의 storage_key(=백업 대상 파일 위치)를 함께 얻는다.
-        //
         // TODO(Concurrency):
         //   실제 구현에서는 documents 행을 SELECT ... FOR UPDATE 등으로 잠가
         //   동시에 같은 문서가 수정될 때 같은 revision_no가 생성되지 않도록 해야 한다.
         //   UNIQUE(file_id, revision_no)는 최종 방어선이며,
         //   애플리케이션은 문서 단위 잠금 또는 DB row lock으로 revision_no 증가를 보호해야 한다.
-        //
         //   현재 의사코드 한계:
         //     - DatabaseConnection이 stub이라 실제 락 동작을 표현할 수 없음
         //     - 두 동시 요청이 같은 previousRevisionNo를 읽으면 같은 newRevisionNo를 생성
         //     - 두 INSERT 중 하나는 uq_file_revision(file_id, revision_no) 위반으로 거부됨
         //       → 거부된 쪽은 재시도 또는 오류 응답해야 함 (현재 코드는 재시도 미구현)
-        //
         //   [Java 전환 시]
         //     - @Transactional + repository.findByIdForUpdate(fileId) (Pessimistic Lock)
         //     - 또는 documents에 @Version 컬럼 추가 후 Optimistic Lock + 재시도 루프
@@ -1394,7 +1344,7 @@ public:
         }
 
         // 9. 버전 업데이트 완료 이벤트
-        // 05/14 - 이벤트 타입 수정: "version_created" → "version_updated"
+        // 이벤트 타입 수정: "version_created" → "version_updated"
         // 이중 알림 수정 (2025-05):
         //   이전: dispatchEvent("version_updated") → 리스너에서 notifyStakeholders()
         //         + 아래 12단계에서 다시 notifyStakeholders() 직접 호출 → 중복 발송
@@ -1407,7 +1357,7 @@ public:
         //       {"message", "New revision " + std::to_string(newRevisionNo) + " by " + userId}
         //   });
 
-        // ── commit 이후 후처리 ─────────────────────────────────────
+        // ── commit 이후 후처리
         // 핵심 버전 생성(파일+DB)은 위 트랜잭션에서 이미 완료됨.
         // 이하 후처리는 독립적으로 실패해도 버전 생성 자체는 성공으로 간주.
         // 각각 try/catch로 분리하여 한 단계 실패가 전체를 실패시키지 않도록 함.
@@ -1423,7 +1373,7 @@ public:
                          " (rev " + std::to_string(previousRevisionNo) +
                          " → " + std::to_string(newRevisionNo) + ")";
 
-                // 04/30 - version_diffs INSERT (캐시)
+                // version_diffs INSERT (캐시)
                 // 항상 구체적인 versionId 페어로 저장 → 캐시 영구 유효
                 db->execute(
                     "INSERT IGNORE INTO version_diffs "
@@ -1448,6 +1398,20 @@ public:
         }
         auditLog->logActivity(userId, fileId, "file_modified", logMsg);
 
+        // RD-SRS-9.3: activity 테이블에 버전 수정 이력 기록
+        //   변경자(userId), 변경일시(timestamp), 변경 내용(logMsg = diff 요약),
+        //   versionId를 함께 저장하여 통합 이력 조회 시 활용 가능.
+        //   logMsg 예시: "Modified: 3 lines added, 1 deleted (rev 3 -> 4)"
+        //               "Modified (diff cache failed): ..." (diff 실패 시)
+        try {
+            logDocumentChangeHistory(userId, fileId, "version_updated",
+                                     logMsg,
+                                     std::make_optional(versionId));
+        } catch (const std::exception& e) {
+            auditLog->logActivity(userId, fileId, "history_log_failed",
+                std::string("logDocumentChangeHistory failed: ") + e.what());
+        }
+
         // 11. 보존 정책 적용 (자동 정리)
         // 실패해도 버전 생성은 이미 완료 — 다음 호출 시 재시도됨
         try {
@@ -1471,22 +1435,16 @@ public:
 
         return version;
     }
-    // 05/18 - 자동 트리거 메커니즘은 위 12단계의 notifyStakeholders 호출로 표현.
+    // 자동 트리거 메커니즘은 위 12단계의 notifyStakeholders 호출로 표현.
     //         실 운영에서는 dispatchEvent("version_updated") 발행 후
     //         @EventListener가 notifyStakeholders를 비동기 호출하는 구조로 분리해야 한다.
 
     // RD-SRS-9.3: 문서 변경 이력에는 수정자, 수정 시각, 변경 내용, 변경 이유가 포함되어야 함
-    // code: apps/activity/lib/Data.php (send)
-    //       apps/admin_audit/lib/Files.php
-    //       apps/files_versions/lib/Db/VersionEntity.php (metadata)
     // 변경 이유(reason)는 Nextcloud 기본 구현에 없어 커스텀 확장 필요
-    // 03/18 - versionId 매개변수 추가 (GPT 리뷰 반영)
-    //   변경 전: file_id + MAX(timestamp)로 최신 버전을 찾아 metadata 갱신
+    // versionId 매개변수 추가
     //   문제: 같은 초에 여러 버전이 있으면 잘못된 버전까지 업데이트됨
-    //   변경 후: versionId가 있을 때만 해당 버전의 metadata를 정확히 갱신
     //   호출부 호환: 기존 4인자 호출(setDocumentStatus 등)은 기본값 std::nullopt로 동작
-    //
-    // 05/18 - ID 정책 개정 반영:
+    // ID 정책 개정 반영:
     //   - fileId는 UUID (documents.file_id), versionId도 UUID (files_versions.version_id).
     //   - activity.object_id에 fileId(UUID)를 그대로 저장한다.
     //     스키마상 object_id는 VARCHAR(255)이므로 UUID 수용 가능.
@@ -1501,21 +1459,21 @@ public:
         ActivityEntry activity;
         activity.userId = userId;
         activity.action = action;
-        // 02/10 - 9.1과 동일하게 초 단위로 통일
+        // 9.1과 동일하게 초 단위로 통일
         activity.timestamp = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()
         ).count();
         activity.subject = "file_" + action;
         activity.objectType = "files";
         activity.objectId = fileId;
-        // 02/10 - message 필드 설정
+        // message 필드 설정
         activity.message = action + (reason.empty() ? "" : " - Reason: " + reason);
 
         // reason 필드는 Nextcloud 기본 스키마에 없음
         // 커스텀 구현: metadata JSON 필드 또는 별도 테이블 필요
         if (!reason.empty()) {
             activity.reason = reason;
-            // 03/18 - 특정 버전이 명확할 때만 version metadata 갱신
+            // 특정 버전이 명확할 때만 version metadata 갱신
             //   versionId가 없는 호출(setDocumentStatus 등)은 activity/audit만 기록
             //   versionId가 있는 호출(버전 생성/수정)은 해당 버전의 metadata를 정확히 갱신
             if (versionId.has_value() && !versionId->empty()) {
@@ -1527,12 +1485,27 @@ public:
         }
 
         // 2. Activity 테이블에 저장
-        // 03/18 - MariaDB 호환: timestamp, user는 예약어이므로 백틱 필요
+        // MariaDB 호환: timestamp, user는 예약어이므로 백틱 필요
+        // RD-SRS-9.3: subjectparams에 구조화된 변경 정보 저장
+        //   기존: "{}" (빈 JSON) → 이력 조회 시 상세 내용 없음
+        //   변경: action, fileId, versionId(optional), reason(optional) 포함
+        //   parseJson()으로 역파싱하거나 JSON 경로 조회로 reason, versionId 추출 가능
+        std::string subjectParams = std::string("{")
+            + "\"action\":\"" + escapeJsonString(action) + "\""
+            + ",\"fileId\":\"" + escapeJsonString(fileId) + "\"";
+        if (versionId.has_value() && !versionId->empty()) {
+            subjectParams += ",\"versionId\":\"" + escapeJsonString(*versionId) + "\"";
+        }
+        if (!reason.empty()) {
+            subjectParams += ",\"reason\":\"" + escapeJsonString(reason) + "\"";
+        }
+        subjectParams += "}";
+
         db->execute("INSERT INTO activity (`timestamp`, `user`, affecteduser, app, subject, "
                     "subjectparams, file, object_type, object_id) "
                     "VALUES (?, ?, ?, 'files', ?, ?, ?, ?, ?)",
                     {std::to_string(activity.timestamp), activity.userId, activity.userId, activity.subject,
-                    "{}", activity.objectId, activity.objectType, activity.objectId});
+                    subjectParams, activity.objectId, activity.objectType, activity.objectId});
 
         // 3. Admin Audit 로그 (maps to Admin_Audit\Files)
         if (isAdminAuditEnabled()) {
@@ -1542,7 +1515,7 @@ public:
             if (!reason.empty()) {
                 auditLogMsg += ", Reason: " + reason;
             }
-            // 03/18 - versionId가 있으면 감사 로그에 포함
+            // versionId가 있으면 감사 로그에 포함
             if (versionId.has_value() && !versionId->empty()) {
                 auditLogMsg += ", Version: " + *versionId;
             }
@@ -1561,10 +1534,7 @@ public:
     // 9.2와 마찬가지로 트랜잭션 없음 -> 데이터 불일치 가능성 존재
 
     // RD-SRS-9.4: 이전 버전과 현재 버전 간 차이를 비교할 수 있어야 함
-    // code: apps/files_versions/lib/Sabre/VersionFile.php (get)
-    //       apps/files_versions/lib/Storage.php (getVersions)
-    // Called from desktop via: GET /remote.php/dav/versions/{user}/versions/{fileId}/{versionId}
-    // 04/30 - Phase A-5 헬퍼: DiffMethod enum → 문자열 변환
+    // 헬퍼: DiffMethod enum → 문자열 변환
     //   version_diffs 테이블 저장용. Java 전환 시 enum.name() 대체
     static std::string diffMethodToString(DiffMethod method) {
         switch (method) {
@@ -1575,7 +1545,7 @@ public:
         return "unknown";
     }
 
-    // 05/14 - 헬퍼 추가: 문자열 → DiffMethod enum 역변환
+    // 헬퍼 추가: 문자열 → DiffMethod enum 역변환
     //   prepareVersionComparison의 캐시 hit 경로에서 사용
     //   알 수 없는 값(레거시, 손상된 데이터)은 안전 기본값 TEXT_DIRECT 반환
     static DiffMethod stringToDiffMethod(const std::string& s) {
@@ -1585,11 +1555,10 @@ public:
         return DiffMethod::TEXT_DIRECT;  // 안전 기본값
     }
 
-    // 04/30 - Phase A-5: 저장된 diff 캐시 직접 조회 (UI에서 호출)
+    // 저장된 diff 캐시 직접 조회 (UI에서 호출)
     //   prepareVersionComparison 없이 캐시만 빠르게 조회하고 싶을 때 사용
     //   반환: 캐시 hit 시 hunks_json + 메타, miss 시 빈 결과
-    //
-    // 05/18 - ID 정책 개정 반영:
+    // ID 정책 개정 반영:
     //   - fileId / fromVersionId / toVersionId는 모두 UUID 문자열로 가정.
     //   - 호출자가 "current"를 넘기는 경우, prepareVersionComparison이
     //     사전에 documents.current_version_id로 해석해 구체 versionId로 넘기는 것이 권장.
@@ -1612,11 +1581,11 @@ public:
         return rows[0];
     }
 
-    // 03/13 - 기존: 서버는 콘텐츠만 제공, diff는 클라이언트 담당
+    // 기존: 서버는 콘텐츠만 제공, diff는 클라이언트 담당
     //         변경: DiffService를 통해 서버 측에서 diff 계산 후 결과를 포함하여 반환
-    // 04/30 - Phase A-5: 캐시 우선 조회 (Q8=A 결정)
+    // 캐시 우선 조회 (Q8=A 결정)
     //   동작: version_diffs 캐시 hit 시 즉시 반환, miss 시 계산 후 INSERT
-    // 05/18 - ID 정책 개정 반영:
+    // ID 정책 개정 반영:
     //   - versionId는 UUID. versionId 문자열에서 경로를 조립하지 않음.
     //   - 실제 파일은 항상 files_versions.storage_key로 조회 → fileStorage->readFile(storage_key)
     //   - "current" 특수값 의존을 줄임:
@@ -1631,7 +1600,7 @@ public:
         diff.versionId1 = versionId1;
         diff.versionId2 = versionId2;
 
-        // 05/18 - "current" → 실제 UUID 해석 헬퍼 (람다)
+        // "current" → 실제 UUID 해석 헬퍼 (람다)
         //   호환성: 기존 호출자가 "current"를 넘겨도 동작하되, 내부에서는 구체 versionId로 일원화.
         //   이후 storage_key 조회/캐시 키 모두 구체 ID로 통일됨.
         auto resolveVersionId = [&](const std::string& vid) -> std::string {
@@ -1665,7 +1634,7 @@ public:
             diff.diffResult.unifiedDiff   = cached.at("hunks_json");
             diff.diffResult.addedLines    = std::stoi(cached.at("added_lines"));
             diff.diffResult.deletedLines  = std::stoi(cached.at("deleted_lines"));
-            // 05/14 - diff_method 복원
+            // diff_method 복원
             diff.diffResult.method        = stringToDiffMethod(cached.at("diff_method"));
 
             // 콘텐츠 로드 (캐시는 diff 결과만, 콘텐츠는 별도)
@@ -1714,7 +1683,7 @@ public:
         if (diffService != nullptr) {
             diff.diffResult = diffService->computeDiff(diff.content1, diff.content2);
 
-            // 04/30 - Phase A-5: 계산 결과를 캐시에 저장
+            // 계산 결과를 캐시에 저장
             //   05/18 - 캐시 키는 구체 versionId 페어. "current"를 저장하지 않으므로
             //           시간이 지나도 캐시 항목의 의미가 변하지 않음 (영구 유효).
             auto now = std::chrono::duration_cast<std::chrono::seconds>(
@@ -1735,7 +1704,7 @@ public:
         }
         // diffService가 nullptr인 경우: 콘텐츠만 반환 (기존 동작 유지, 하위 호환)
 
-        // 03/13 - Dead Code 제거: versionInfo1, versionInfo2 DB 조회 제거 (기존)
+        // Dead Code 제거: versionInfo1, versionInfo2 DB 조회 제거 (기존)
 
         // 4. 활동 로그
         std::string logMsg = resolvedVid1 + " vs " + resolvedVid2;
@@ -1748,12 +1717,8 @@ public:
     }
 
     // RD-SRS-9.5: 특정 시점의 문서 버전을 확인하고 조회할 수 있어야 함
-    // code: apps/files_versions/lib/Storage.php (getVersions)
-    //       apps/files_versions/lib/Versions/IVersion.php (getTimestamp)
-    //       apps/files_versions/lib/Sabre/VersionCollection.php
-    // Called from desktop via: PROPFIND /remote.php/dav/versions/{user}/versions/{fileId}/
 
-    // 04/30 - Phase A-6: 페이지네이션 메타데이터용 전체 카운트
+    // 페이지네이션 메타데이터용 전체 카운트
     //   클라이언트가 "12 / 248 페이지"를 표시할 때 필요
     //   getVersionsAtTime과 동일한 WHERE 조건 사용 (targetTimestamp 이하만)
     int64_t countVersions(const std::string& fileId, int64_t targetTimestamp) {
@@ -1766,29 +1731,204 @@ public:
         return std::stoll(rows[0].at("cnt"));
     }
 
+    // ============================================================
+    // RD-SRS-9.3: 통합 변경 이력 조회 (getDocumentHistory)
+    // ------------------------------------------------------------
+    // 목적: 변경자·변경일시·변경 내용·변경 사유를 하나의 타임라인으로 반환.
+    //       기존 코드에서는 files_versions, activity, approval_activity가
+    //       분산 저장되어 있어 호출자가 직접 병합해야 했음 (RD-SRS-9.3 미충족).
+    //       이 메서드가 세 소스를 통합하여 단일 이력 목록으로 제공한다.
+    // 소스별 역할:
+    //   files_versions  → 버전 생성/수정 이력 (변경자, 시각, revision_no, diff 요약)
+    //   activity        → 상태 변경 이력 (status_changed, version_created 등)
+    //                     Fix 3에서 subjectparams에 구조화 JSON 저장으로 개선됨
+    //   approval_activity → 승인/거절/취소 이력 (approver, action, comment)
+    // 반환 순서: timestamp DESC (최신 이력이 먼저)
+    // limit/offset: 페이지네이션 지원
+    // [Java 전환 시] DocumentHistoryService @Service 빈으로 분리.
+    //               Stream.concat() + Comparator로 병합 후 Page<HistoryEntry> 반환.
+    //               @Cacheable로 최근 이력 캐시 적용 가능.
+    // ============================================================
+    std::vector<HistoryEntry> getDocumentHistory(const std::string& userId,
+                                                  const std::string& fileId,
+                                                  int limit = 50,
+                                                  int offset = 0) {
+        if (fileId.empty()) return {};
+
+        constexpr int kMaxLimit = 100;
+        limit  = std::max(1, std::min(limit, kMaxLimit));
+        offset = std::max(0, offset);
+
+        std::vector<HistoryEntry> entries;
+
+        // ── 소스 1: files_versions — 버전 생성/수정 이력
+        // version_diffs와 LEFT JOIN하여 diff 요약(summary)을 함께 조회.
+        // LEFT JOIN 이유: diff 계산이 실패했거나 최초 버전인 경우 version_diffs가 없을 수 있음.
+        auto versionRows = db->query(
+            "SELECT fv.version_id, fv.user_id, fv.`timestamp`, fv.revision_no, "
+            "       fv.metadata, "
+            "       COALESCE(vd.summary, '') AS diff_summary "
+            "FROM files_versions fv "
+            "LEFT JOIN version_diffs vd "
+            "  ON vd.file_id = fv.file_id AND vd.to_version_id = fv.version_id "
+            "WHERE fv.file_id = ? "
+            "ORDER BY fv.`timestamp` DESC",
+            {fileId}
+        );
+
+        for (const auto& row : versionRows) {
+            HistoryEntry e;
+            e.source     = "versions";
+            e.userId     = row.at("user_id");
+            e.timestamp  = std::stoll(row.at("timestamp"));
+            e.versionId  = row.at("version_id");
+            e.revisionNo = row.at("revision_no");
+
+            // revision_no=1 이면 최초 생성, 그 외는 수정
+            e.action = (e.revisionNo == "1") ? "version_created" : "version_updated";
+
+            // diff 요약이 있으면 변경 내용으로, 없으면 revision 정보로 표시
+            std::string diffSummary = row.at("diff_summary");
+            e.summary = diffSummary.empty()
+                        ? "revision_no=" + e.revisionNo
+                        : diffSummary;
+
+            // metadata JSON에서 reason 추출 (Fix 3에서 저장된 구조화 JSON 활용)
+            std::string metadata = row.count("metadata") ? row.at("metadata") : "";
+            if (!metadata.empty()) {
+                auto metaMap = parseJson(metadata);
+                if (metaMap.count("reason") && !metaMap.at("reason").empty()) {
+                    e.reason = metaMap.at("reason");
+                }
+            }
+            entries.push_back(std::move(e));
+        }
+
+        // ── 소스 2: activity — 상태 변경 이력
+        // logDocumentChangeHistory()가 남긴 기록 중 상태 변경 계열만 조회.
+        // version_created / version_updated는 소스 1(files_versions)에서 이미 처리하므로
+        // activity에서는 제외하여 중복 이력 방지.
+        // 포함 대상: status_changed, status_restored, approved_reverted 등
+        auto activityRows = db->query(
+            "SELECT `user`, `timestamp`, subject, subjectparams "
+            "FROM activity "
+            "WHERE object_id = ? AND object_type = 'files' "
+            "  AND subject NOT IN ('file_version_created', 'file_version_updated') "
+            "ORDER BY `timestamp` DESC",
+            {fileId}
+        );
+
+        for (const auto& row : activityRows) {
+            HistoryEntry e;
+            e.source    = "activity";
+            e.userId    = row.at("user");
+            e.timestamp = std::stoll(row.at("timestamp"));
+
+            // subject 예시: "file_status_changed", "file_version_created"
+            std::string subject = row.at("subject");
+            // "file_" 접두어 제거 → 순수 action 이름
+            e.action = (subject.rfind("file_", 0) == 0) ? subject.substr(5) : subject;
+
+            // subjectparams JSON 파싱 (Fix 3에서 구조화됨)
+            std::string params = row.count("subjectparams") ? row.at("subjectparams") : "";
+            if (!params.empty() && params != "{}") {
+                auto paramsMap = parseJson(params);
+                if (paramsMap.count("versionId")) e.versionId = paramsMap.at("versionId");
+                if (paramsMap.count("reason"))    e.reason    = paramsMap.at("reason");
+            }
+
+            e.summary = e.action;  // summary는 action 명칭으로 기본 설정
+            entries.push_back(std::move(e));
+        }
+
+        // ── 소스 3: approval_activity — 승인/거절/취소 이력
+        auto approvalRows = db->query(
+            "SELECT aa.user_id, aa.created_at, aa.action, aa.comment, "
+            "       ar.file_id "
+            "FROM approval_activity aa "
+            "JOIN approval_rules ar ON aa.rule_id = ar.id "
+            "WHERE ar.file_id = ? "
+            "ORDER BY aa.created_at DESC",
+            {fileId}
+        );
+
+        for (const auto& row : approvalRows) {
+            HistoryEntry e;
+            e.source    = "approval";
+            e.userId    = row.at("user_id");
+            e.timestamp = std::stoll(row.at("created_at"));
+            e.action    = "approval_" + row.at("action");  // "approval_approved" 등
+            e.reason    = row.count("comment") ? row.at("comment") : "";
+            e.summary   = row.at("action");  // "approved", "rejected", "cancelled"
+            entries.push_back(std::move(e));
+        }
+
+        // ── 병합: timestamp DESC 정렬
+        std::sort(entries.begin(), entries.end(),
+            [](const HistoryEntry& a, const HistoryEntry& b) {
+                return a.timestamp > b.timestamp;
+            });
+
+        // ── 페이지네이션 적용
+        if (offset >= static_cast<int>(entries.size())) return {};
+
+        int end = std::min(static_cast<int>(entries.size()), offset + limit);
+        std::vector<HistoryEntry> page(entries.begin() + offset,
+                                       entries.begin() + end);
+
+        auditLog->logActivity(userId, fileId, "history_listed",
+            "offset=" + std::to_string(offset) + ", limit=" + std::to_string(limit)
+            + ", total=" + std::to_string(entries.size()));
+
+        return page;
+    }
+
+    // 통합 변경 이력 전체 건수 (페이지네이션 메타데이터용)
+    int64_t countDocumentHistory(const std::string& fileId) {
+        if (fileId.empty()) return 0;
+
+        auto vRows = db->query(
+            "SELECT COUNT(*) AS cnt FROM files_versions WHERE file_id = ?", {fileId});
+        auto aRows = db->query(
+            "SELECT COUNT(*) AS cnt FROM activity "
+            "WHERE object_id = ? AND object_type = 'files' "
+            "  AND subject NOT IN ('file_version_created', 'file_version_updated')",
+            {fileId});
+        auto apRows = db->query(
+            "SELECT COUNT(*) AS cnt FROM approval_activity aa "
+            "JOIN approval_rules ar ON aa.rule_id = ar.id WHERE ar.file_id = ?",
+            {fileId});
+
+        int64_t total = 0;
+        if (!vRows.empty())  total += std::stoll(vRows[0].at("cnt"));
+        if (!aRows.empty())  total += std::stoll(aRows[0].at("cnt"));
+        if (!apRows.empty()) total += std::stoll(apRows[0].at("cnt"));
+        return total;
+    }
+
     std::vector<VersionInfo> getVersionsAtTime(const std::string& userId,
                                                 const std::string& fileId,
                                                 int64_t targetTimestamp,
                                                 int limit = 50,
                                                 int offset = 0) {
-        // 05/18 - ID 정책 개정 반영:
+        // ID 정책 개정 반영:
         //   - fileId는 UUID (documents.file_id). 호출자는 documents 조회로 미리 얻어야 함.
         //   - SELECT에 revision_no, storage_key 컬럼 추가 → VersionInfo 신규 필드 채움.
         //   - versionId 문자열로 저장 경로를 추론하지 않는다 (storage_key 컬럼 사용).
         std::vector<VersionInfo> versions;
 
-        // 03/18 - limit 범위 방어 (GPT 리뷰 반영)
-        // 04/30 - Phase A-6 (Q10=A): 기본 limit 10 → 50으로 상향 (UI 페이지 사이즈)
+        // limit 범위 방어
+        // (Q10=A): 기본 limit 10 → 50으로 상향 (UI 페이지 사이즈)
         constexpr int kMinLimit = 1;
         constexpr int kMaxLimit = 100;
         if (limit < kMinLimit) limit = kMinLimit;
         else if (limit > kMaxLimit) limit = kMaxLimit;
-        // 04/30 - offset 음수 방어
+        // offset 음수 방어
         if (offset < 0) offset = 0;
 
         // 1. 모든 버전 목록 조회 (maps to Storage::getVersions)
-        // 04/30 - Phase A-6: OFFSET 추가 (페이지네이션 지원)
-        // 05/18 - SELECT 절에 revision_no, storage_key 추가
+        // OFFSET 추가 (페이지네이션 지원)
+        // SELECT 절에 revision_no, storage_key 추가
         auto results = db->query(
             "SELECT version_id, file_id, revision_no, user_id, `timestamp`, "
             "       size, mimetype, storage_key, metadata "
@@ -1804,7 +1944,7 @@ public:
         for (const auto& row : results) {
             VersionInfo version;
             version.fileId     = row.at("file_id");
-            version.versionId  = row.at("version_id");      // 03/18 - DB에서 직접 조회
+            version.versionId  = row.at("version_id");      // DB에서 직접 조회
             version.revisionNo = row.count("revision_no")   // 05/18 추가
                                  ? std::stoll(row.at("revision_no")) : 0;
             version.timestamp  = std::stoll(row.at("timestamp"));
@@ -1813,7 +1953,7 @@ public:
             version.storageKey = row.count("storage_key")   // 05/18 추가
                                  ? row.at("storage_key") : "";
 
-            // 02/10 - user_id 컬럼 우선, metadata fallback
+            // user_id 컬럼 우선, metadata fallback
             auto metadata = parseJson(row.at("metadata"));
             std::string userId_col = row.count("user_id") ? row.at("user_id") : "";
             if (!userId_col.empty()) {
@@ -1850,7 +1990,7 @@ public:
                 version.mimeType   = row.at("mimetype");
                 version.storageKey = row.count("storage_key")
                                      ? row.at("storage_key") : "";
-                // 02/10 - user_id 컬럼 우선, metadata fallback
+                // user_id 컬럼 우선, metadata fallback
                 auto metadata = parseJson(row.at("metadata"));
                 std::string userId_col = row.count("user_id") ? row.at("user_id") : "";
                 if (!userId_col.empty()) {
@@ -1871,12 +2011,10 @@ public:
     }
 
     // RD-SRS-9.6: 문서 상태 관리 (초안, 검토중, 승인됨, 폐기 등)
-    // code: apps/systemtags/lib/Controller/LastUsedController.php
     //       lib/public/SystemTag/ISystemTagManager.php (createTag/updateTag)
     //       lib/public/SystemTag/ISystemTagObjectMapper.php (assignTags)
     // Called via: OCS API POST /ocs/v2.php/apps/systemtags
-    //
-    // 05/18 - ID 정책 개정 반영:
+    // ID 정책 개정 반영:
     //   - fileId는 UUID (documents.file_id, CHAR(36))로 가정.
     //   - 본 메서드는 systemtag_object_mapping.object_id에 fileId를 그대로 사용한다.
     //     스키마상 object_id는 VARCHAR(255)이므로 UUID(36자) 수용 가능.
@@ -1931,12 +2069,10 @@ public:
     // 트랜잭션 안에서 setDocumentStatus를 호출하면 트랜잭션 내부에서
     // notifyStakeholders → flushOutboxImmediate가 실행되는 문제가 있음.
     // (외부 알림이 나간 뒤 트랜잭션이 rollback되면 DB는 되돌아갔는데 알림은 나간 상태)
-    //
     // 사용처:
     //   - processApprovalDecision의 트랜잭션 안 (상태 전이 + rule close를 원자적으로)
     //   - processApprovalWorkflow의 규칙 생성 트랜잭션 안
     // 알림/워크플로우는 commit 이후 호출부가 직접 처리해야 함.
-    //
     // [전환 시] @Transactional 내부에서는 이벤트 발행만 하고,
     //           실제 알림은 트랜잭션 commit 후 이벤트 리스너가 처리.
     // ============================================================
@@ -2027,16 +2163,12 @@ public:
     }
 
     // RD-SRS-9.7: 문서 승인 워크플로우 및 승인 프로세스 관리
-    // code: apps/approval/lib/Service/RuleService.php (createRule, checkRule, storeAction)
-    //       apps/workflowengine/lib/Manager.php
-    //       apps/notifications (알림 발송)
     // Approval 앱은 별도 저장소이므로 기본 기능을 모방
-    // 05/06 - Phase A-9: 합의 모드 + 임계값 매개변수 추가 (호환성 위해 기본값 제공)
+    // 합의 모드 + 임계값 매개변수 추가 (호환성 위해 기본값 제공)
     //   기존 호출(consensusMode/requiredApprovals 미지정): THRESHOLD 모드, 1명 승인
     //                                                   = 기존 "첫 승인자가 결정" 동작과 동일
     //   새 호출 시 SEQUENTIAL 모드면 approvers 순서가 sequence_order로 사용됨
-    //
-    // 05/18 - ID 정책 개정 반영:
+    // ID 정책 개정 반영:
     //   - fileId는 UUID (documents.file_id)로 가정.
     //   - approval_rules.target_file_id 컬럼은 VARCHAR이므로 UUID 그대로 저장 가능.
     //   - 승인 워크플로우는 문서의 라이브 콘텐츠를 건드리지 않으므로
@@ -2055,7 +2187,7 @@ public:
 
         switch (action) {
             case ApprovalAction::REQUEST: {
-                // 03/05 - 선행 검증 1: 빈 승인자 목록 방어
+                // 선행 검증 1: 빈 승인자 목록 방어
                 // 승인자가 없으면 누구도 APPROVE/REJECT할 수 없어 문서가 UNDER_REVIEW에 영구 체류
                 if (approvers.empty()) {
                     auditLog->logActivity(userId, fileId, "approval_failed",
@@ -2063,7 +2195,7 @@ public:
                     break;  // success = false 유지
                 }
 
-                // 05/06 - Phase A-9: 임계값 정규화 (모드별 의미 통일)
+                // 임계값 정규화 (모드별 의미 통일)
                 // 승인자 목록을 먼저 중복 제거 — required_approvals 계산도 여기서 통일
                 // 버그 수정: 원본 approvers.size()로 required를 계산하면
                 //   입력: [A, A, B] → 실제 저장: [A, B] 2명인데 required=3이 되어
@@ -2088,7 +2220,7 @@ public:
                     }
                 }
 
-                // 03/05 - 선행 검증 2: 태그 기반 중복 승인 요청 방어 (Nextcloud 방식)
+                // 선행 검증 2: 태그 기반 중복 승인 요청 방어 (Nextcloud 방식)
                 // pending 태그(under_review)가 이미 할당되어 있으면 승인 대기 중이므로 중복 요청 거부
                 // systemtag_object_mapping이 Single Source of Truth (setDocumentStatus가 관리)
                 auto pendingCheck = db->query(
@@ -2106,13 +2238,11 @@ public:
                 // 현재 구조: 상태 변경(setDocumentStatusInternal)과
                 //   approval_rules/requesters/approvers INSERT가 하나의 TransactionGuard 안에서 처리됨.
                 //   중간 실패 시 rollback으로 상태와 규칙이 함께 취소됨.
-                //
                 // 아직 남은 한계 (Java 전환 시 개선):
                 //   pending 여부 확인(pendingCheck)이 트랜잭션 밖에서 수행되므로
                 //   동시에 두 요청이 들어올 경우 race condition이 완전히 제거되지 않음.
                 //   Java 전환 시: documents SELECT ... FOR UPDATE로 row lock 후
                 //   트랜잭션 안에서 pending 재확인 + 상태 변경 + 규칙 생성을 원자적으로 처리.
-                //
                 //   Java 전환 시 권장 구조:
                 //     @Transactional
                 //     → setDocumentStatusInternal(UNDER_REVIEW)  // 알림 없음
@@ -2121,18 +2251,15 @@ public:
                 //     → approvers INSERT
                 //     → commit
                 //     → commit 이후 approval_requested 알림 발송
-                //
                 //   또한 pending 여부 확인도 트랜잭션 안에서 row lock으로 처리해야
                 //   동시 승인 요청 경합을 완전히 방지할 수 있음.
 
                 // 1~4. 상태 변경 + 승인 규칙 생성을 하나의 트랜잭션으로 묶음
-                //
                 // 버그 수정: 이전 코드는 setDocumentStatus(UNDER_REVIEW)를 트랜잭션 밖에서
                 //   호출하여 알림이 먼저 나간 뒤 규칙 생성이 실패하면 DRAFT 복원 알림까지
                 //   이중으로 발송되는 문제가 있었음.
                 //   → setDocumentStatusInternal(알림 없음)을 트랜잭션 안에서 사용하고
                 //     알림은 commit 이후 한 번만 발송하도록 수정.
-                //
                 // [전환 시] @Transactional 하나로 전체를 감싸고,
                 //   commit 이후 approval_requested 이벤트를 발행하는 구조로 대체.
                 std::string ruleId = generateUUID();
@@ -2232,7 +2359,7 @@ public:
             }
 
             case ApprovalAction::APPROVE: {
-                // 03/13 - APPROVE/REJECT 공통 로직을 processApprovalDecision으로 추출
+                // APPROVE/REJECT 공통 로직을 processApprovalDecision으로 추출
                 success = processApprovalDecision(
                     userId, fileId, comment,
                     DocumentStatus::APPROVED, TAG_APPROVED,
@@ -2244,12 +2371,10 @@ public:
                 //   true를 반환하면 무조건 document_approved 이벤트를 발생시켰음.
                 //   → 3명 중 1명만 승인해도 (consensus=PENDING) document_approved 이벤트가
                 //     발생하여 "문서가 승인됨" 알림이 잘못 나가는 로직 오류.
-                //
                 // 수정: document_approved 이벤트 발생 제거.
                 //   최종 승인 완료(consensus=APPROVED) 시의 알림은
                 //   processApprovalDecision() 내부 commit 이후 블록에서 이미 처리됨.
                 //   caller에서 중복 발생시키는 것은 불필요하며 오히려 오작동 유발.
-                //
                 // [전환 시] processApprovalDecision()의 반환값을 bool 대신
                 //   ApprovalDecisionResult { FAILED, RECORDED_PENDING, FINAL_APPROVED, FINAL_REJECTED }
                 //   enum으로 변경하면 caller가 FINAL_APPROVED일 때만 후속 처리를 할 수 있음.
@@ -2257,7 +2382,7 @@ public:
             }
 
             case ApprovalAction::REJECT: {
-                // 03/13 - APPROVE/REJECT 공통 로직을 processApprovalDecision으로 추출
+                // APPROVE/REJECT 공통 로직을 processApprovalDecision으로 추출
                 success = processApprovalDecision(
                     userId, fileId, comment,
                     DocumentStatus::REJECTED, TAG_REJECTED,
@@ -2268,7 +2393,7 @@ public:
             }
 
             case ApprovalAction::CANCEL: {
-                // 04/30 - Phase A-7: 승인 요청 취소 (Q11=B+C 결정)
+                // 승인 요청 취소 (Q11=B+C 결정)
                 //   권한: 요청자 본인 + 관리자 + 승인자 (셋 중 하나)
                 //   REJECT와의 차이: 거절 사유 기록 없음. 행정적 무효화 처리.
                 //   상태 전이: UNDER_REVIEW → DRAFT (재작업 가능)
@@ -2277,7 +2402,7 @@ public:
                 break;
             }
 
-            // 03/05 - default case 추가 (setDocumentStatus와 동일한 방어 패턴)
+            // default case 추가 (setDocumentStatus와 동일한 방어 패턴)
             default:
                 throw std::invalid_argument("Unknown ApprovalAction: " + std::to_string(static_cast<int>(action)));
         }
@@ -2285,7 +2410,7 @@ public:
         return success;
     }
 
-    // 04/30 - Phase A-7: 승인 요청 취소 처리
+    // 승인 요청 취소 처리
     //   권한 (Q11=B+C 결정):
     //     1) 요청자 본인 — 본인이 요청한 것을 철회
     //     2) 관리자 — 시스템 관리자 (휴직/퇴사 사용자의 stale 요청 정리 등)
@@ -2340,16 +2465,13 @@ public:
         }
 
         // 3~5. 규칙 상태 변경 + 취소 이력 + 문서 상태 복원: 트랜잭션으로 묶음
-        //
         // 버그 수정 1: approval_rules CANCELLED 후 approval_activity INSERT 실패 시
         //   rule은 닫혔는데 문서 상태가 UNDER_REVIEW에 머무는 정합성 오류 방지
-        //
         // 버그 수정 2: UNIQUE(rule_id, user_id) 충돌 방지
         //   같은 사용자가 이미 approved/rejected를 남긴 경우 'cancelled' INSERT가
         //   UNIQUE 제약에 걸려 실패하는 문제.
         //   해결: 기존 결정 기록이 있는 사용자의 경우 approval_activity INSERT를 건너뛰고
         //         audit_log에만 취소 이력을 남김.
-        //
         // [전환 시] @Transactional + setDocumentStatusInternal 사용으로 원자화
         auto now = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()
@@ -2435,8 +2557,8 @@ public:
         return true;
     }
 
-    // 04/30 - Phase A-7: 관리자 권한 체크
-    // 05/06 - 의사코드 99% 보강: 스텁 → 실제 DB 조회로 전환
+    // 관리자 권한 체크
+    // 의사코드 99% 보강: 스텁 → 실제 DB 조회로 전환
     //   Q2=A 결정: USER / ADMIN 두 역할만 사용
     //   향후 세분화 시 역할별 hasRole(userId, "EDITOR") 같은 일반 메서드 추가 가능
     // [Java 전환 시] Spring Security의 hasRole('ADMIN') 또는
@@ -2450,7 +2572,7 @@ public:
         return !rows.empty();
     }
 
-    // 05/06 - Phase ②: 역할 부여 (관리자만 다른 사용자에게 ADMIN 부여 가능)
+    // Phase ②: 역할 부여 (관리자만 다른 사용자에게 ADMIN 부여 가능)
     //   재귀 부여 방지: SUPER_ADMIN 같은 메타 권한이 추후 추가되면 검증 강화 필요
     bool assignRole(const std::string& granterId,
                     const std::string& targetUserId,
@@ -2477,7 +2599,7 @@ public:
         return true;
     }
 
-    // 05/06 - Phase ②: 역할 회수
+    // Phase ②: 역할 회수
     //   05/14 - 마지막 ADMIN 회수 차단 추가
     //     문제: 시스템에 ADMIN이 1명일 때 본인 ADMIN을 회수하면
     //           assignRole/revokeRole 등 isAdmin이 필요한 모든 작업이 영구 불가 (lockout)
@@ -2492,7 +2614,7 @@ public:
             return false;
         }
 
-        // 05/14 - 마지막 ADMIN 회수 차단
+        // 마지막 ADMIN 회수 차단
         if (role == "ADMIN") {
             auto adminCount = db->query(
                 "SELECT COUNT(*) AS cnt FROM user_roles WHERE role = 'ADMIN'", {}
@@ -2516,7 +2638,7 @@ public:
         return affected > 0;
     }
 
-    // 05/06 - Phase ②: 모든 ADMIN 사용자 목록 (관리 UI용)
+    // Phase ②: 모든 ADMIN 사용자 목록 (관리 UI용)
     std::vector<std::string> listAdmins() {
         std::vector<std::string> result;
         auto rows = db->query(
@@ -2701,28 +2823,44 @@ public:
             return false;
         }
 
-        // 4. 태그 직접 갱신 (isValidTransition 우회)
-        // 03/18 - MariaDB 호환: REPLACE INTO
+        // 4. 태그 갱신 + 이력 기록: TransactionGuard로 원자화 (isValidTransition 우회)
+        // [수정] 기존 코드는 REPLACE INTO 성공 후 logDocumentChangeHistory 실패 시
+        //        상태는 DRAFT인데 이력이 없는 불일치가 발생할 수 있었음.
+        //        cancelApprovalRequest와 동일하게 TransactionGuard로 묶어 원자성 보장.
+        // [Java 전환 시] @Transactional 단일 트랜잭션.
+        //               logDocumentChangeHistory 내 workflowEngine->dispatchEvent()는
+        //               @TransactionalEventListener(AFTER_COMMIT)으로 이동.
         auto draftTagRows = db->query(
             "SELECT id FROM systemtag WHERE name = ?", {std::string(TAG_DRAFT)}
         );
         if (draftTagRows.empty()) {
-            return false;  // 태그 미정의 (초기 데이터 누락)
+            auditLog->logActivity(adminUserId, fileId, "restore_failed",
+                "systemtag 'draft' undefined — check initial data");
+            return false;
         }
         std::string draftTagId = draftTagRows[0].at("id");
 
-        db->execute(
-            "REPLACE INTO systemtag_object_mapping "
-            "(objectid, objecttype, systemtagid) "
-            "VALUES (?, 'files', ?)",
-            {fileId, draftTagId}
-        );
+        try {
+            TransactionGuard tx(*db);
 
-        // 5. 활동 로그 + 변경 이력
-        logDocumentChangeHistory(adminUserId, fileId, "status_restored",
-            "DEPRECATED → DRAFT (admin restore). Reason: " + reason);
+            db->execute(
+                "REPLACE INTO systemtag_object_mapping "
+                "(objectid, objecttype, systemtagid) "
+                "VALUES (?, 'files', ?)",
+                {fileId, draftTagId}
+            );
 
-        // 6. 이해관계자 알림
+            logDocumentChangeHistory(adminUserId, fileId, "status_restored",
+                "DEPRECATED -> DRAFT (admin restore). Reason: " + reason);
+
+            tx.commit();
+        } catch (const std::exception& e) {
+            auditLog->logActivity(adminUserId, fileId, "restore_failed",
+                std::string("Transaction failed — tag and history rolled back: ") + e.what());
+            return false;
+        }
+
+        // 5. commit 이후 알림 (실패해도 복원 자체는 완료됨)
         notifyStakeholders(fileId, "status_restored",
             "Document restored from DEPRECATED to DRAFT by admin. Reason: " + reason,
             {});
@@ -2772,26 +2910,41 @@ public:
             return false;
         }
 
-        // 4. 태그 갱신 (isValidTransition 우회 — 의도된 예외)
+        // 4. 태그 갱신 + 이력 기록: TransactionGuard로 원자화 (isValidTransition 우회 — 의도된 예외)
+        // [수정] restoreFromDeprecated와 동일한 이유로 TransactionGuard 추가.
+        // [Java 전환 시] @Transactional. workflowEngine->dispatchEvent()는 AFTER_COMMIT으로 이동.
         auto draftTagRows = db->query(
             "SELECT id FROM systemtag WHERE name = ?", {std::string(TAG_DRAFT)}
         );
-        if (draftTagRows.empty()) return false;
+        if (draftTagRows.empty()) {
+            auditLog->logActivity(userId, fileId, "revert_failed",
+                "systemtag 'draft' undefined — check initial data");
+            return false;
+        }
         std::string draftTagId = draftTagRows[0].at("id");
-
-        db->execute(
-            "REPLACE INTO systemtag_object_mapping "
-            "(objectid, objecttype, systemtagid) "
-            "VALUES (?, 'files', ?)",
-            {fileId, draftTagId}
-        );
-
-        // 5. 변경 이력 (감사 추적)
         std::string actor = isOwner ? "owner" : "admin";
-        logDocumentChangeHistory(userId, fileId, "approved_reverted",
-            "APPROVED → DRAFT by " + actor + " (error correction). Reason: " + errorReason);
 
-        // 6. 이해관계자 알림
+        try {
+            TransactionGuard tx(*db);
+
+            db->execute(
+                "REPLACE INTO systemtag_object_mapping "
+                "(objectid, objecttype, systemtagid) "
+                "VALUES (?, 'files', ?)",
+                {fileId, draftTagId}
+            );
+
+            logDocumentChangeHistory(userId, fileId, "approved_reverted",
+                "APPROVED -> DRAFT by " + actor + " (error correction). Reason: " + errorReason);
+
+            tx.commit();
+        } catch (const std::exception& e) {
+            auditLog->logActivity(userId, fileId, "revert_failed",
+                std::string("Transaction failed — tag and history rolled back: ") + e.what());
+            return false;
+        }
+
+        // 5. commit 이후 알림
         notifyStakeholders(fileId, "approved_reverted",
             "Approved document reverted to DRAFT for error correction by " +
             actor + ": " + errorReason,
@@ -2846,7 +2999,7 @@ public:
         );
 
         // 3. 채널 정규화: 빈 입력이면 기본값(PUSH+WEB) 사용
-        // 05/14 - 중복 채널 dedup 추가 (PK file_id, user_id, channel 충돌 방어)
+        // 중복 채널 dedup 추가 (PK file_id, user_id, channel 충돌 방어)
         std::vector<NotificationChannel> effective = channels;
         if (effective.empty()) {
             effective = {NotificationChannel::PUSH, NotificationChannel::WEB};
@@ -2972,13 +3125,95 @@ public:
         return result;
     }
 
+    // ============================================================
+    // RD-SRS-9.9 푸시 토큰 등록/해제 (신규 추가)
+    // ------------------------------------------------------------
+    // 목적: attemptDelivery의 PUSH 채널이 notifications_pushhash에서 토큰을 읽는데,
+    //       토큰을 등록하는 진입점이 없었음.
+    //       클라이언트(앱)가 FCM/APNs 토큰을 발급받으면 이 메서드를 통해 서버에 등록해야
+    //       PUSH 알림 발송이 가능하다.
+    // 토큰 등록 흐름:
+    //   앱 최초 실행 또는 토큰 갱신 → registerPushToken(userId, newToken)
+    //   앱 로그아웃 또는 푸시 수신 거부 → deregisterPushToken(userId, token)
+    // 토큰 중복/재사용 정책:
+    //   - 같은 토큰이 다른 userId에 이미 등록된 경우 먼저 제거 후 재등록.
+    //     (앱 재설치, 계정 전환 시 이전 사용자의 토큰이 새 사용자 기기에 전달될 수 있음)
+    //   - 같은 (uid, token) 쌍이 이미 존재하면 중복 등록 방지 (silent return false).
+    // [Java 전환 시] @Transactional로 step 1~3 원자화.
+    //               토큰 암호화 저장 검토 (PII 성격 있음).
+    //               @PreAuthorize("isAuthenticated()")로 본인 토큰만 등록 가능하게 제한.
+    // ============================================================
+
+    // 푸시 토큰 등록 (앱 시작 시 또는 토큰 갱신 시 호출)
+    //   token: FCM Registration Token 또는 APNs Device Token
+    //   반환: true = 신규 등록 성공, false = 이미 동일 등록 존재하거나 실패
+    bool registerPushToken(const std::string& userId, const std::string& token) {
+        if (userId.empty() || token.empty()) return false;
+
+        // 1. 같은 토큰이 다른 uid에 이미 등록된 경우 먼저 제거
+        //    (앱 재설치 후 계정 전환 시나리오: 이전 사용자 토큰 재사용 방지)
+        db->execute(
+            "DELETE FROM notifications_pushhash WHERE token = ? AND uid != ?",
+            {token, userId}
+        );
+
+        // 2. 같은 (uid, token) 쌍이 이미 존재하면 중복 등록 불필요
+        auto existing = db->query(
+            "SELECT id FROM notifications_pushhash WHERE uid = ? AND token = ? LIMIT 1",
+            {userId, token}
+        );
+        if (!existing.empty()) {
+            return false;  // 이미 등록됨 — 오류 아님, 호출자는 무시 가능
+        }
+
+        // 3. 신규 등록
+        // [Java 전환 시] step 1~3 전체를 @Transactional로 묶어 race condition 방지
+        db->execute(
+            "INSERT INTO notifications_pushhash (uid, token) VALUES (?, ?)",
+            {userId, token}
+        );
+        auditLog->logActivity(userId, "", "push_token_registered",
+            "Push token registered (length=" + std::to_string(token.size()) + ")");
+        return true;
+    }
+
+    // 푸시 토큰 해제 (로그아웃 또는 푸시 수신 거부 시 호출)
+    //   token: 해제할 토큰. 빈 문자열이면 userId의 모든 토큰 삭제 (기기 전체 해제)
+    //   반환: true = 1건 이상 삭제 성공, false = 해당 토큰 없음
+    bool deregisterPushToken(const std::string& userId, const std::string& token) {
+        if (userId.empty()) return false;
+
+        int affected;
+        if (token.empty()) {
+            // 모든 토큰 삭제 (로그아웃, 계정 탈퇴 시나리오)
+            affected = db->execute(
+                "DELETE FROM notifications_pushhash WHERE uid = ?",
+                {userId}
+            );
+            if (affected > 0) {
+                auditLog->logActivity(userId, "", "push_token_deregistered",
+                    "All push tokens removed (count=" + std::to_string(affected) + ")");
+            }
+        } else {
+            // 특정 토큰만 삭제
+            affected = db->execute(
+                "DELETE FROM notifications_pushhash WHERE uid = ? AND token = ?",
+                {userId, token}
+            );
+            if (affected > 0) {
+                auditLog->logActivity(userId, "", "push_token_deregistered",
+                    "Push token removed (length=" + std::to_string(token.size()) + ")");
+            }
+        }
+        return affected > 0;
+    }
+
     // 명시적 구독 외 자동 이해관계자 조회 (Q2 = B 표준안 채택)
     // - 파일 소유자 (files_versions의 최초 user_id, 추후 owners 테이블 도입 시 그쪽 우선)
     // - 마지막 수정자 (files_versions에서 timestamp DESC 1번째)
     // - 진행 중인 승인 요청의 요청자/승인자 (approval_rules.status = 'OPEN')
     // - 채널은 기본값(PUSH+WEB) 적용. 사용자별 선호 채널은 향후 user_preferences 테이블에서 조회 예정
-    //
-    // 04/30 - Phase A-3 (Q4=B): eventType별 이해관계자 범위 차등 적용
+    // (Q4=B): eventType별 이해관계자 범위 차등 적용
     //   현재는 모든 이벤트에 대해 "소유자+마지막수정자+승인관련자" 합집합을 반환.
     //   향후 확장 시 eventType별로 다음과 같이 차등 적용 예정:
     //     - "version_created"      : 소유자 (생성자 본인은 알림 불필요)
@@ -2997,7 +3232,7 @@ public:
             return {};
         }
 
-        // 05/06 - Phase ③ (의사코드 99% 보강): eventType별 이해관계자 차등 적용
+        // Phase ③ (의사코드 99% 보강): eventType별 이해관계자 차등 적용
         //   기존: 모든 이벤트에 대해 보수적 합집합 정책
         //   변경: 이벤트의 의미에 맞게 알림 대상 정밀화 → 알림 폭탄 감소
         //   매핑 규칙 (코드 직전 주석에 적혀있던 계획을 실제 분기로 옮김):
@@ -3012,7 +3247,6 @@ public:
         //     "status_restored"     : 소유자 + 마지막 수정자
         //     "version_deleted"     : 소유자 + 관리자 목록
         //     기타 (default)        : 보수적 합집합 (예전 동작)
-        //
         // 헬퍼 람다: 각 그룹 추가 시 코드 중복 줄임
         auto addOwner = [&]() {
             auto owner = db->query(
@@ -3048,7 +3282,7 @@ public:
             );
             for (const auto& row : approvers) userIds.insert(row.at("entity_id"));
         };
-        // 05/14 - approval_completed/cancelled 이벤트 전용:
+        // approval_completed/cancelled 이벤트 전용:
         //   processApprovalDecision의 마지막 broadcast 시점에는 이미 status='CLOSED'로 전환된 상태
         //   processApprovalDecision 시작 → activity INSERT → setDocumentStatus → 요청자 알림
         //     → UPDATE status='CLOSED' → broadcast notifyStakeholders("approval_completed", ...)
@@ -3096,7 +3330,7 @@ public:
             addOwner();
         } else if (eventType == "approval_completed"
                 || eventType == "approval_cancelled") {
-            // 05/14 - status='OPEN' 조건 없는 변형 사용
+            // status='OPEN' 조건 없는 변형 사용
             //   완료/취소 시점에는 rule이 CLOSED/CANCELLED로 전환된 상태이므로
             addApprovalRequestersAny();
             addApprovalApproversAny();
@@ -3105,7 +3339,7 @@ public:
             addApprovalRequesters();
             addApprovalApprovers();
         } else if (eventType == "approved_reverted") {
-            // 05/14 - approved_reverted는 이미 CLOSED된 APPROVED rule을 되돌리는 시점
+            // approved_reverted는 이미 CLOSED된 APPROVED rule을 되돌리는 시점
             //         과거 결정에 참여한 승인자/요청자에게도 알림이 가야 함
             addOwner();
             addLastEditor();
@@ -3134,7 +3368,7 @@ public:
         return result;
     }
 
-    // ── 헬퍼: NotificationChannel ↔ 문자열 변환 ──
+    // ── 헬퍼: NotificationChannel ↔ 문자열 변환
     // DB 저장 시 enum 값을 문자열로, 조회 시 다시 enum으로 복원
     static std::string channelToString(NotificationChannel ch) {
         switch (ch) {
@@ -3152,30 +3386,20 @@ public:
     }
 
     // RD-SRS-9.9: 문서 변경 시 관련 이해관계자에게 자동 알림
-    // code: lib/private/Notification/Manager.php (createNotification, notify)
-    //       apps/notifications/lib/Push.php (pushToDevice)
-    //       apps/notifications/lib/BackgroundJob/SendNotificationMails.php
     // Triggered by: 파일 변경 이벤트, 워크플로우 이벤트
-    //
-    // 04/30 - Phase A-2: targets 자동 결정 로직 추가
-    //   변경 전: 호출자가 targets를 직접 지정해야 했음 → 호출부마다 대상 결정 로직 중복
-    //   변경 후: targets가 비어있으면 getSubscribers + getDefaultStakeholders로
+    // targets 자동 결정 로직 추가
     //          자동 산출. 호환성을 위해 명시 지정도 그대로 동작
-    //
-    // 04/30 - Phase A-3: 자동 트리거 호출부에서 호출되도록 통합
+    // 자동 트리거 호출부에서 호출되도록 통합
     //   호출 위치: createInitialVersion, onDocumentModified, setDocumentStatus,
     //              processApprovalWorkflow(REQUEST), processApprovalDecision
     //   [Java 전환 시] @EventListener 기반으로 변경. 각 메서드는 이벤트만 발행하고
     //                  notifyStakeholders는 리스너로 분리
-    //
-    // 04/30 - Phase A-4: 중복 알림 방지 (dedup_key)
+    // 중복 알림 방지 (dedup_key)
     //   동일 이벤트가 5분 내 같은 사용자에게 두 번 발생해도 무시 (UNIQUE INDEX 사용)
-    //
-    // 04/30 - Phase A-X: Outbox 패턴 적용
+    // Outbox 패턴 적용
     //   채널별 즉시 발송 → outbox INSERT(PENDING) → 즉시 발송 시도 → 성공 시 SENT
     //   실패 시 PENDING 유지, processOutboxQueue가 재시도
-    //
-    // 05/18 - ID 정책 개정 반영:
+    // ID 정책 개정 반영:
     //   - fileId는 UUID (documents.file_id)로 가정.
     //   - 알림 메시지에 표시할 "버전 N" 같은 사용자 표기는 호출자가
     //     revision_no를 별도로 문자열에 포함해 넘기는 것이 권장된다.
@@ -3186,7 +3410,7 @@ public:
                             const std::string& eventType,
                             const std::string& message,
                             const std::vector<NotificationTarget>& targets) {
-        // ── 1. 대상 자동 결정 (Phase A-2) ──
+        // ── 1. 대상 자동 결정 (Phase A-2)
         std::vector<NotificationTarget> effectiveTargets;
         if (targets.empty()) {
             effectiveTargets = getSubscribers(fileId);
@@ -3204,12 +3428,12 @@ public:
             effectiveTargets = targets;
         }
 
-        // 02/10 - 이벤트 timestamp를 루프 밖에서 한 번만 생성
+        // 이벤트 timestamp를 루프 밖에서 한 번만 생성
         auto eventTimestamp = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()
         ).count();
 
-        // ── 2. 사용자별 알림 처리 ──
+        // ── 2. 사용자별 알림 처리
         int dedupSkipped = 0;
         for (const auto& target : effectiveTargets) {
             // 2-1. dedup_key 생성 (Phase A-4)
@@ -3244,19 +3468,25 @@ public:
             }
         }
 
-        // ── 3. 즉시 발송 시도 (Phase A-X, Q5=A 결정) ──
+        // ── 3. 즉시 발송 시도 (Phase A-X, Q5=A 결정)
         //   PENDING 항목 중 방금 추가한 것들을 즉시 처리.
         //   실패한 것은 PENDING 유지 → processOutboxQueue가 백그라운드로 재시도
         flushOutboxImmediate(eventTimestamp);
 
-        // ── 4. 활동 로그 ──
+        // ── 4. 활동 로그
         auditLog->logActivity("system", fileId, "notifications_sent",
             "Event: " + eventType
             + ", Recipients: " + std::to_string(effectiveTargets.size())
             + ", DedupSkipped: " + std::to_string(dedupSkipped));
 
-        // ── 5. 배치 처리 트리거 (필요한 경우) ──
-        // [Java 전환 시] Spring @Scheduled 빈으로 대체
+        // ── 5. 배치 처리 트리거 자리표시자
+        // shouldBatchNotifications()는 항상 true를 반환하고
+        // scheduleBackgroundJob()은 실제 작업을 하지 않는 no-op stub이다.
+        // 이 블록은 "Java 전환 후 @Scheduled가 processOutboxQueue()를 주기적으로
+        // 호출하게 될 위치"를 표시하는 설계 마커(design marker)다.
+        // C++ 의사코드에서 실질적인 재시도는 scheduledOutboxFlush()를 외부에서 수동 호출한다.
+        // [Java 전환 시] 이 블록 전체를 제거하고 processOutboxQueue()에
+        //               @Scheduled(fixedDelay = 60_000)을 직접 적용한다.
         if (shouldBatchNotifications()) {
             scheduleBackgroundJob("SendNotificationMails");
         }
@@ -3306,27 +3536,57 @@ public:
 
     // 백그라운드 잡: PENDING 큐 처리 (재시도 정책 적용)
     //   주기적 호출 (예: 1분마다). retry_after가 도래한 항목만 처리.
-    //   [Java 전환 시] @Scheduled(fixedDelay=60000) 메서드로 변환
-    // TODO(Java 전환 시 — outbox 멀티 worker 안정성):
-    //   현재 구조는 싱글 프로세스 기준. worker가 여러 개면 PENDING row 중복 발송 가능.
-    //   다음 구조로 개선 필요:
-    //     1. notification_outbox에 status='PROCESSING', locked_by, locked_at 컬럼 추가
-    //     2. worker가 row를 가져갈 때 claim UPDATE(status='PROCESSING', locked_by=worker_id) 먼저 수행
-    //     3. locked_by 기준으로 본인 소유 row만 발송 처리
-    //     4. 일정 시간 PROCESSING 유지 시 stale lock 감지 후 재시도 가능하도록 처리
-    //   현재 PENDING/SENT/DLQ 구조는 싱글 프로세스에서만 안전.
+    //   [Java 전환 시] @Scheduled(fixedDelay=60000) 메서드로 변환.
+    // ── 멀티 Worker 안전성 구현 (기존 TODO 완료)
+    //   기존 구조: SELECT PENDING → 처리
+    //     → Worker가 여러 개면 같은 row를 동시에 가져가 중복 발송 가능
+    //   변경 구조: PENDING → PROCESSING (claim) → 처리 → SENT/DLQ/PENDING(retry)
+    //     1. Worker 고유 ID(workerId)를 생성하여 row를 PROCESSING으로 UPDATE (원자적 claim)
+    //     2. locked_by = workerId인 row만 조회하여 처리
+    //     3. 성공: SENT / 재시도: PENDING(locked_by=NULL) / DLQ: DLQ
+    //     4. stale lock 회수: 5분 이상 PROCESSING 유지 row → PENDING 복원
+    //        (Worker 크래시 또는 네트워크 장애 시 복구)
+    //   MariaDB의 UPDATE ... LIMIT은 지원하지만 ORDER BY + LIMIT UPDATE는
+    //   서브쿼리가 필요하므로 LIMIT만 사용 (순서 보장 불필요, 처리만 되면 됨)
+    //   [Java 전환 시] locked_by에 hostname:pid 또는 Spring application name 사용.
+    //                 SELECT ... FOR UPDATE SKIP LOCKED도 동등한 대안.
     int processOutboxQueue() {
         auto now = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()
         ).count();
 
-        // 재시도 시각이 도래한 PENDING 항목만 가져옴
+        // 0. stale lock 회수 (Worker 크래시 복구)
+        //    5분(kStaleLockSeconds) 이상 PROCESSING 상태로 방치된 row를 PENDING으로 복원
+        constexpr int64_t kStaleLockSeconds = 300;
+        db->execute(
+            "UPDATE notification_outbox "
+            "SET status = 'PENDING', locked_by = NULL, locked_at = NULL "
+            "WHERE status = 'PROCESSING' "
+            "  AND locked_at IS NOT NULL AND locked_at <= ?",
+            {std::to_string(now - kStaleLockSeconds)}
+        );
+
+        // 1. row claim: PENDING → PROCESSING (Worker 단위 원자적 claim)
+        //    이 UPDATE가 성공한 row는 이 Worker만 처리 가능
+        //    다른 Worker가 동시에 같은 UPDATE를 수행해도 각자 다른 row를 가져감
+        //    (MariaDB InnoDB row-level lock에 의해 UPDATE가 직렬화됨)
+        std::string workerId = generateUUID();
+        int claimed = db->execute(
+            "UPDATE notification_outbox "
+            "SET status = 'PROCESSING', locked_by = ?, locked_at = ? "
+            "WHERE status = 'PENDING' AND retry_after <= ? "
+            "LIMIT 100",
+            {workerId, std::to_string(now), std::to_string(now)}
+        );
+
+        if (claimed == 0) return 0;  // 처리할 항목 없음
+
+        // 2. 본인(workerId)이 claim한 row만 조회
         auto pending = db->query(
             "SELECT id, notification_id, user_id, channel, payload, retry_count "
             "FROM notification_outbox "
-            "WHERE status = 'PENDING' AND retry_after <= ? "
-            "ORDER BY retry_after ASC LIMIT 100",
-            {std::to_string(now)}
+            "WHERE status = 'PROCESSING' AND locked_by = ?",
+            {workerId}
         );
 
         int processed = 0;
@@ -3362,7 +3622,16 @@ public:
                         {userId}
                     );
                     if (pushTokens.empty()) {
-                        // 토큰 없음 → 발송 불가지만 재시도해도 의미 없음 → 성공 처리
+                        // 토큰 미등록 상태: PUSH 발송 불가
+                        // success = true로 처리하는 이유:
+                        //   토큰이 없으면 재시도해도 동일 결과이므로 retry는 무의미하다.
+                        //   사용자가 registerPushToken()을 호출하기 전까지 해소 불가.
+                        //   단, 발송 여부 추적이 가능하도록 audit log를 남긴다.
+                        //   (기존 코드는 이 경우를 무음으로 성공 처리하여 추적 불가였음)
+                        auditLog->logActivity(userId, outboxId, "push_skipped_no_token",
+                            "PUSH outbox " + outboxId + " marked SENT without delivery: "
+                            "no push token registered for user '" + userId + "'. "
+                            "Token can be registered via registerPushToken().");
                         success = true;
                     } else {
                         for (const auto& token : pushTokens) {
@@ -3418,12 +3687,36 @@ public:
                 );
                 auditLog->logActivity("system", userId, "notification_dlq",
                     "Outbox " + outboxId + " moved to DLQ after " +
-                    std::to_string(newRetryCount) + " attempts");
+                    std::to_string(newRetryCount) + " attempts. Error: " + errorMsg);
+
+                // DLQ 발생 시 관리자 알림
+                // retryDlqNotification()으로 수동 재발송 가능
+                try {
+                    auto adminRows = db->query(
+                        "SELECT user_id FROM user_roles WHERE role = 'ADMIN' LIMIT 5",
+                        {}
+                    );
+                    for (const auto& admin : adminRows) {
+                        std::string adminId = admin.at("user_id");
+                        NotificationTarget adminTarget{adminId,
+                            {NotificationChannel::WEB}};
+                        notifyStakeholders("", "notification_dlq",
+                            "Outbox " + outboxId + " moved to DLQ for user " +
+                            userId + ". Channel: " + channelStr +
+                            ". Error: " + errorMsg +
+                            ". Use retryDlqNotification() to retry.",
+                            {adminTarget});
+                    }
+                } catch (const std::exception& e) {
+                    auditLog->logActivity("system", userId, "dlq_admin_notify_failed",
+                        "Failed to notify admins of DLQ: " + std::string(e.what()));
+                }
             } else {
                 int64_t backoffSeconds = calculateBackoff(newRetryCount);
                 db->execute(
                     "UPDATE notification_outbox "
-                    "SET retry_count = ?, retry_after = ?, last_error = ? "
+                    "SET retry_count = ?, retry_after = ?, last_error = ?, "
+                    "    status = 'PENDING', locked_by = NULL, locked_at = NULL "
                     "WHERE id = ?",
                     {std::to_string(newRetryCount),
                      std::to_string(now + backoffSeconds),
@@ -3443,6 +3736,101 @@ public:
             default: return 1800;  // 안전 기본값
         }
     }
+    // ============================================================
+    // RD-SRS-9.9: DLQ 사후 처리 API
+    // ------------------------------------------------------------
+    // DLQ(Dead Letter Queue)로 이동한 알림에 대한 관리자 조회·재발송 기능.
+    // Outbox 패턴에서 3회 재시도 후 DLQ 전이까지는 구현되어 있었으나,
+    // 이후 관리자가 확인하고 수동 재발송할 수단이 없었음.
+    // ============================================================
+
+    // DLQ 목록 조회 (관리자 전용)
+    //   특정 userId의 DLQ 항목 또는 전체 DLQ 목록 반환.
+    //   userId가 빈 문자열이면 전체 DLQ 조회 (관리자 대시보드용).
+    std::vector<std::map<std::string, std::string>> getDlqItems(
+            const std::string& adminId,
+            const std::string& filterUserId = "",
+            int limit = 50,
+            int offset = 0) {
+        if (!isAdmin(adminId)) {
+            auditLog->logActivity(adminId, "", "dlq_access_denied",
+                "Non-admin attempted DLQ list access");
+            return {};
+        }
+
+        std::vector<std::map<std::string, std::string>> rows;
+        if (filterUserId.empty()) {
+            rows = db->query(
+                "SELECT id, notification_id, user_id, channel, payload, "
+                "       retry_count, last_error, created_at "
+                "FROM notification_outbox "
+                "WHERE status = 'DLQ' "
+                "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                {std::to_string(limit), std::to_string(offset)}
+            );
+        } else {
+            rows = db->query(
+                "SELECT id, notification_id, user_id, channel, payload, "
+                "       retry_count, last_error, created_at "
+                "FROM notification_outbox "
+                "WHERE status = 'DLQ' AND user_id = ? "
+                "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                {filterUserId, std::to_string(limit), std::to_string(offset)}
+            );
+        }
+
+        auditLog->logActivity(adminId, "", "dlq_list_queried",
+            "DLQ list queried. filter=" + (filterUserId.empty() ? "(all)" : filterUserId) +
+            " count=" + std::to_string(rows.size()));
+        return rows;
+    }
+
+    // DLQ 항목 수동 재발송 (관리자 전용)
+    //   outboxId: 재발송할 notification_outbox.id
+    //   DLQ 항목을 PENDING으로 되돌려 processOutboxQueue()가 재처리하게 함.
+    //   retry_count는 0으로 초기화하여 3회 재시도 기회를 다시 부여.
+    bool retryDlqNotification(const std::string& adminId,
+                               const std::string& outboxId) {
+        if (!isAdmin(adminId)) {
+            auditLog->logActivity(adminId, "", "dlq_retry_denied",
+                "Non-admin attempted DLQ retry for outbox " + outboxId);
+            return false;
+        }
+
+        // DLQ 상태 확인
+        auto rows = db->query(
+            "SELECT id, user_id, channel FROM notification_outbox "
+            "WHERE id = ? AND status = 'DLQ' LIMIT 1",
+            {outboxId}
+        );
+        if (rows.empty()) {
+            auditLog->logActivity(adminId, "", "dlq_retry_not_found",
+                "Outbox " + outboxId + " not found or not in DLQ status");
+            return false;
+        }
+
+        auto now = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()
+        ).count();
+
+        // PENDING으로 복원 + retry_count 초기화 + lock 해제
+        int affected = db->execute(
+            "UPDATE notification_outbox "
+            "SET status = 'PENDING', retry_count = 0, retry_after = ?, "
+            "    last_error = NULL, locked_by = NULL, locked_at = NULL "
+            "WHERE id = ? AND status = 'DLQ'",
+            {std::to_string(now), outboxId}
+        );
+
+        if (affected > 0) {
+            auditLog->logActivity(adminId, rows[0].at("user_id"),
+                "dlq_retry_requested",
+                "Outbox " + outboxId + " reset to PENDING for retry by admin " + adminId);
+            return true;
+        }
+        return false;
+    }
+
     // 현재 수동 호출 방식으로 구현되어 있음 추후 framework 연동을 통하여 이벤트 연동을 통하여 자동으로 호출할 수 있도록 구현이 필요
 
     // ============================================================
@@ -3724,7 +4112,7 @@ public:
         return processed;
     }
 
-    // ── A-10 헬퍼들 ──
+    // ── A-10 헬퍼들
 
     static std::string retentionScopeToString(RetentionPolicyScope s) {
         switch (s) {
@@ -3748,12 +4136,23 @@ public:
 
     // file_id에서 폴더 경로 추출 (의사코드 단순화)
     //   "/projects/legal/contract.pdf" → "/projects/legal/"
-    //   확정된 폴더 모델이 없는 경우 빈 문자열 반환 (FOLDER 단계 스킵)
-    // [Java 전환 시] Nextcloud의 IFile.getParent().getPath() 사용
+    // extractFolderPath: fileId(UUID)에 대응하는 폴더 경로 반환
+    //   fileId는 UUID이므로 문자열에서 직접 경로 추출 불가.
+    //   documents.current_path를 조회하여 실제 파일 경로에서 폴더를 추출한다.
+    //   예: current_path = "/legal/2025/계약서.docx" → "/legal/2025/"
+    //   FOLDER scope 정책 매칭에 사용.
+    // [Java 전환 시] IFile.getParent().getPath()로 교체
     std::string extractFolderPath(const std::string& fileId) {
-        auto pos = fileId.rfind('/');
+        if (fileId.empty()) return "";
+        auto rows = db->query(
+            "SELECT current_path FROM documents WHERE file_id = ? LIMIT 1",
+            {fileId}
+        );
+        if (rows.empty() || !rows[0].count("current_path")) return "";
+        const std::string& path = rows[0].at("current_path");
+        auto pos = path.rfind('/');
         if (pos == std::string::npos) return "";
-        return fileId.substr(0, pos + 1);  // trailing slash 포함
+        return path.substr(0, pos + 1);  // trailing slash 포함 ("/legal/2025/")
     }
 
     // 사용자 명시 버전 삭제 (Phase A-10 결정 ⑤: 정책 위반 처리)
@@ -3761,8 +4160,7 @@ public:
     //   관리자: forceDelete=true로 정책 우회 가능 (단, 항상 로그 기록)
     //   추가 시나리오: 개인정보 삭제 요청, 잘못 업로드된 파일 즉시 제거 등
     // [Java 전환 시] @PreAuthorize로 forceDelete 권한 분리. 감사 로그는 별도 테이블
-    //
-    // 05/18 - ID 정책 개정 반영:
+    // ID 정책 개정 반영:
     //   - versionId는 UUID (CHAR(36)). versionId 문자열로 저장 경로를 조립하지 않음.
     //   - 파일 삭제 시 files_versions.storage_key를 SELECT한 뒤 그 경로로 deleteFile.
     bool deleteVersion(const std::string& userId,
@@ -3783,11 +4181,11 @@ public:
         std::string storageKey    = versionRows[0].count("storage_key")
                                     ? versionRows[0].at("storage_key") : "";
 
-        // 05/14 - 권한 체크 추가: 파일 소유자 또는 관리자만 삭제 가능
+        // 권한 체크 추가: 파일 소유자 또는 관리자만 삭제 가능
         //   기존: minDays 미위반 시 누구나 삭제 가능 → 보안 이슈
         //   해결: 파일의 최초 버전 작성자(=소유자) 또는 관리자만 허용
         //   주의: forceDelete의 관리자 체크는 별도 (minDays 우회용)
-        // 05/18 - documents.owner_user_id를 우선 조회로 변경 권장 (TODO).
+        // documents.owner_user_id를 우선 조회로 변경 권장 (TODO).
         //         현 의사코드에서는 기존 로직(최초 버전 작성자) 유지.
         bool isOwnerOfFile = false;
         auto ownerRows = db->query(
@@ -3835,17 +4233,65 @@ public:
                 "Admin overrode minDays policy for version " + versionId);
         }
 
+        // 3.5 현재 버전 삭제 방지
+        // documents.current_version_id가 삭제되면 문서의 현재 상태 조회·수정·비교가 모두 깨진다.
+        // 일반 삭제: 현재 버전이면 거부
+        // forceDelete + 관리자: 허용하되 직전 버전으로 current_version_id 재설정
+        auto currentRows = db->query(
+            "SELECT current_version_id FROM documents WHERE file_id = ?",
+            {fileId}
+        );
+        bool isCurrentVersion = !currentRows.empty() &&
+                                 currentRows[0].at("current_version_id") == versionId;
+
+        if (isCurrentVersion) {
+            if (!forceDelete || !isAdmin(userId)) {
+                auditLog->logActivity(userId, fileId, "version_delete_denied",
+                    "Cannot delete current version " + versionId +
+                    ". Use forceDelete (admin only) to override.");
+                return false;
+            }
+            // 관리자 forceDelete: 직전 버전으로 current_version_id 재설정
+            auto prevRows = db->query(
+                "SELECT version_id, revision_no FROM files_versions "
+                "WHERE file_id = ? AND version_id != ? "
+                "ORDER BY `timestamp` DESC LIMIT 1",
+                {fileId, versionId}
+            );
+            if (prevRows.empty()) {
+                auditLog->logActivity(userId, fileId, "version_delete_denied",
+                    "Cannot delete the only version of document " + fileId);
+                return false;
+            }
+            db->execute(
+                "UPDATE documents SET current_version_id = ?, current_revision_no = ? "
+                "WHERE file_id = ?",
+                {prevRows[0].at("version_id"), prevRows[0].at("revision_no"), fileId}
+            );
+            auditLog->logActivity(userId, fileId, "current_version_reset",
+                "current_version_id reset to " + prevRows[0].at("version_id") +
+                " after force-deleting " + versionId);
+        }
+
         // 4. 삭제 실행
         // 현재: DB 먼저 삭제 → 파일 삭제. DB 성공 후 파일 삭제 실패 시 orphan file 발생.
         // 현재는 예외 catch 후 audit log로 추적 가능.
-        //
-        // TODO(Java 전환 시 — 파일-DB 삭제 완전 정합성):
-        //   파일 삭제와 DB 삭제를 원자적으로 보장할 수 없으므로 상태 기반 비동기 삭제로 전환:
-        //     1. files_versions.status = 'DELETION_PENDING' → commit
-        //     2. 비동기 worker가 파일 삭제 시도
-        //     3. 파일 삭제 성공 → DB row 삭제 또는 status = 'DELETED'
-        //     4. 파일 삭제 실패 → retry_count 증가, 일정 횟수 초과 시 관리자 알림
-        //   DLP 시스템에서 민감 문서의 orphan file은 보안 이슈이므로 반드시 반영 필요
+        // [Java 전환 시] DELETION_PENDING → 비동기 워커 삭제 → DELETED 상태 전이로 파일-DB 정합성 보장
+        // version_diffs 캐시 정리 (ghost diff 방지)
+        // 이 버전을 from 또는 to로 참조하는 diff 캐시를 먼저 제거.
+        // Schema에 FK CASCADE가 없으므로 명시적 정리 필요.
+        try {
+            db->execute(
+                "DELETE FROM version_diffs "
+                "WHERE from_version_id = ? OR to_version_id = ?",
+                {versionId, versionId}
+            );
+        } catch (const std::exception& e) {
+            auditLog->logActivity("system", fileId, "diff_cleanup_failed",
+                "version_diffs cleanup failed for " + versionId + ": " + e.what());
+            // diff 정리 실패는 버전 삭제를 막지 않음 — 계속 진행
+        }
+
         int affected = db->execute(
             "DELETE FROM files_versions WHERE version_id = ?",
             {versionId}
@@ -3865,7 +4311,7 @@ public:
             auditLog->logActivity(userId, fileId, "version_deleted",
                 "Version " + versionId + " deleted by " + userId);
 
-            // 05/14 - 자동 트리거 추가 (③ 매트릭스의 version_deleted: 소유자 + 관리자 전원)
+            // 자동 트리거 추가 (③ 매트릭스의 version_deleted: 소유자 + 관리자 전원)
             // 삭제 성공 후 알림 실패가 전체 실패처럼 보이지 않도록 safeNotify 사용
             // [Java 전환 시] VersionDeletedEvent 발행으로 분리
             safeNotify(userId, fileId, "version_deleted",
@@ -3876,17 +4322,121 @@ public:
         return false;
     }
 
+    // ============================================================
+    // RD-SRS-9.1 / 문서 이동·이름변경 API
+    // ------------------------------------------------------------
+    // 목적: file_id(UUID)는 평생 불변이며 경로 변경에 영향받지 않는다.
+    //       documents.current_path만 갱신하면 모든 버전 이력·승인 기록이 유지된다.
+    //       storage_key는 변경하지 않는다 (파일 복사/이동 없이 DB 변경만으로 완료).
+    // 구분:
+    //   renameDocument: 같은 폴더 내 파일명 변경 (경로의 마지막 세그먼트만 변경)
+    //   moveDocument:   다른 폴더로 이동 (전체 경로 변경)
+    //   두 메서드는 내부 로직이 동일하며 current_path 갱신과 이력 기록을 공유한다.
+    // [Java 전환 시] @Transactional로 경로 갱신 + 이력 기록 원자화.
+    //               PathChangedEvent 발행 → 구독자 알림 비동기 처리.
+    //               FOLDER scope 정책 재평가(evaluatePolicy) 트리거 필요.
+    // ============================================================
+
+    bool renameDocument(const std::string& userId,
+                        const std::string& fileId,
+                        const std::string& newFileName) {
+        if (userId.empty() || fileId.empty() || newFileName.empty()) return false;
+        return changeDocumentPath(userId, fileId, newFileName, "renamed");
+    }
+
+    bool moveDocument(const std::string& userId,
+                      const std::string& fileId,
+                      const std::string& newPath) {
+        if (userId.empty() || fileId.empty() || newPath.empty()) return false;
+        return changeDocumentPath(userId, fileId, newPath, "moved");
+    }
+
+    // renameDocument / moveDocument 공통 구현
+    bool changeDocumentPath(const std::string& userId,
+                             const std::string& fileId,
+                             const std::string& newPath,
+                             const std::string& changeType) {
+        // 1. 문서 존재 확인 + 현재 경로 조회
+        auto docRows = db->query(
+            "SELECT current_path, owner_user_id FROM documents WHERE file_id = ? LIMIT 1",
+            {fileId}
+        );
+        if (docRows.empty()) {
+            auditLog->logActivity(userId, fileId, "path_change_failed",
+                "Document not found: " + fileId);
+            return false;
+        }
+        const std::string oldPath   = docRows[0].at("current_path");
+        const std::string ownerUserId = docRows[0].at("owner_user_id");
+
+        // 2. 권한 체크: 소유자 또는 관리자만 경로 변경 가능
+        if (userId != ownerUserId && !isAdmin(userId)) {
+            auditLog->logActivity(userId, fileId, "path_change_denied",
+                "User " + userId + " has no permission to " + changeType + " file " + fileId);
+            return false;
+        }
+
+        // 3. 경로 변경 실행
+        //    핵심 원칙: file_id 불변, storage_key 불변, current_path만 갱신
+        auto now = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()
+        ).count();
+        int affected = db->execute(
+            "UPDATE documents SET current_path = ?, updated_at = ? WHERE file_id = ?",
+            {newPath, std::to_string(now), fileId}
+        );
+        if (affected == 0) return false;
+
+        // 4. 변경 이력 기록 (RD-SRS-9.3)
+        logDocumentChangeHistory(userId, fileId, "path_" + changeType,
+            oldPath + " -> " + newPath);
+
+        // 5. 이해관계자 알림 (commit 이후 후처리)
+        try {
+            notifyStakeholders(fileId, "path_changed",
+                "Document " + changeType + " from " + oldPath +
+                " to " + newPath + " by " + userId, {});
+        } catch (const std::exception& e) {
+            auditLog->logActivity("system", fileId, "notification_failed",
+                changeType + " notification failed: " + std::string(e.what()));
+        }
+
+        auditLog->logActivity(userId, fileId, "document_" + changeType,
+            oldPath + " -> " + newPath);
+        return true;
+    }
+
+    // RD-SRS-9.10 헬퍼: 특정 버전이 보호 대상인지 확인
+    //   보호 조건: 문서의 current_version_id이면서 문서 상태가 APPROVED인 버전
+    //   이 버전은 maxVersions/maxDays 조건에 걸려도 삭제하지 않는다.
+    //   [Java 전환 시] 법적 보존 플래그(legalHold), 태그 기반 보호 조건도 추가 가능
+    bool isProtectedVersion(const std::string& fileId, const std::string& versionId) {
+        auto rows = db->query(
+            "SELECT d.current_version_id, st.name AS status "
+            "FROM documents d "
+            "LEFT JOIN systemtag_object_mapping m "
+            "  ON m.objectid = d.file_id AND m.objecttype = 'files' "
+            "LEFT JOIN systemtag st ON st.id = m.systemtagid "
+            "WHERE d.file_id = ? LIMIT 1",
+            {fileId}
+        );
+        if (rows.empty()) return false;
+
+        bool isCurrentVersion = (rows[0].at("current_version_id") == versionId);
+        bool isApproved = rows[0].count("status") &&
+                          rows[0].at("status") == "approved";
+
+        // 현재 버전이면서 APPROVED 상태인 경우 보호
+        return isCurrentVersion && isApproved;
+    }
+
     // RD-SRS-9.10: 문서 버전 관리 정책 구성 (보존 기간, 최대 버전 수 등)
-    // code: apps/files_versions/lib/Expiration.php (getExpireList)
-    //       apps/files_versions/lib/Storage.php (expire)
-    //       apps/files_versions/lib/BackgroundJob/ExpireVersions.php
-    // Config: versions_retention_obligation (auto, D/auto, auto/D, D1/D2)
     int applyVersionRetentionPolicy(const std::string& fileId,
                                     const RetentionPolicy& policy) {
         int deletedVersions = 0;
 
         // 1. 현재 정책 읽기 (maps to config versions_retention_obligation)
-        // 02/10 - policyString을 로그에 활용 (원래 dead code였음)
+        // policyString을 로그에 활용 (원래 dead code였음)
         std::string policyString = policy.autoCleanup ? "auto" : "";
         if (policy.minDays > 0 && policy.maxDays > 0) {
             policyString = std::to_string(policy.minDays) + "/" + std::to_string(policy.maxDays);
@@ -3896,23 +4446,23 @@ public:
         // policyString은 아래 정리 작업 로그에서 사용됨
 
         // 2. 파일의 모든 버전 조회 (maps to Storage::getVersions)
-        // 03/18 - version_id 컬럼 추가 조회 (삭제 시 고유 식별자로 사용)
-        // 05/18 - storage_key 컬럼도 함께 조회 (실제 파일 삭제 시 경로 추론 없이 사용)
+        // version_id 컬럼 추가 조회 (삭제 시 고유 식별자로 사용)
+        // storage_key 컬럼도 함께 조회 (실제 파일 삭제 시 경로 추론 없이 사용)
         auto versions = db->query(
             "SELECT version_id, file_id, `timestamp`, size, storage_key "
             "FROM files_versions WHERE file_id = ? ORDER BY `timestamp` DESC",
             {fileId});
 
         // 3. 보존할 버전과 삭제할 버전 결정 (maps to Expiration::getExpireList)
-        // 03/05 - vector → unordered_set: 할당량 정리 시 중복 체크를 O(1)로 개선
+        // vector → unordered_set: 할당량 정리 시 중복 체크를 O(1)로 개선
         std::unordered_set<std::string> toDeleteSet;
-        // 02/10 - 초 단위로 통일
+        // 초 단위로 통일
         auto now = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()
         ).count();
 
         // 계층적 보존 전략 구현
-        // 03/05 - 버전 나이 기반 간격 선택으로 수정 (기존: 작은 interval부터 순회하여 계층 무력화)
+        // 버전 나이 기반 간격 선택으로 수정 (기존: 작은 interval부터 순회하여 계층 무력화)
         // 나이별 적용 간격은 getRequiredInterval() 참조
 
         int versionCount = 0;
@@ -3929,28 +4479,36 @@ public:
                 continue;
             }
 
-            // 최대 버전 수 체크
-            if (policy.maxVersions > 0 && versionCount > policy.maxVersions) {
-                toDeleteSet.insert(version.at("version_id"));
+            // APPROVED 보호 체크 — maxVersions/maxDays 보다 앞서 실행
+            // 현재 버전이면서 APPROVED 상태인 버전은 어떤 조건에도 삭제하지 않음
+            if (isProtectedVersion(fileId, version.at("version_id"))) {
+                lastKeptTimestamp = vTimestamp;
                 continue;
             }
 
-            // 최대 보관 기간 체크
-            // 02/10 - 초 단위 통일 - 86400초 = 1일
-            if (policy.maxDays > 0 && versionAge > (int64_t)policy.maxDays * 86400) {
-                toDeleteSet.insert(version.at("version_id"));
-                continue;
-            }
-
-            // 최소 보관 기간 내의 버전은 보존
-            // 02/10 - 초 단위 통일
+            // minDays 보호 — maxVersions/maxDays보다 먼저 실행
+            // minDays 이내 버전은 어떤 조건(maxVersions, maxDays)에도 삭제하지 않음.
+            // 이전에 maxVersions 이후에 있었으나, maxVersions의 continue가 이 체크를
+            // 건너뛰어 minDays 내 버전도 삭제되는 버그가 있었음.
             if (policy.minDays > 0 && versionAge < (int64_t)policy.minDays * 86400) {
                 lastKeptTimestamp = vTimestamp;
                 continue;
             }
 
+            // 최대 버전 수 체크 (minDays 보호 통과 후 실행)
+            if (policy.maxVersions > 0 && versionCount > policy.maxVersions) {
+                toDeleteSet.insert(version.at("version_id"));
+                continue;
+            }
+
+            // 최대 보관 기간 체크 (minDays 보호 통과 후 실행)
+            if (policy.maxDays > 0 && versionAge > (int64_t)policy.maxDays * 86400) {
+                toDeleteSet.insert(version.at("version_id"));
+                continue;
+            }
+
             // 계층적 간격 체크
-            // 03/05 - 버전 나이에 따라 적절한 간격을 선택하여 비교
+            // 버전 나이에 따라 적절한 간격을 선택하여 비교
             // (기존: retentionIntervals를 작은 값부터 순회 → 2초 조건에서 항상 통과하는 버그)
             int64_t requiredInterval = getRequiredInterval(versionAge);
 
@@ -3965,10 +4523,8 @@ public:
 
         // 4. 할당량 기반 추가 정리 (maps to quota-based cleanup)
         if (policy.autoCleanup) {
-            // 03/18 - 과삭제(over-delete) 방지:
-            //   변경 전: 전체 버전 size를 합산 → 이미 삭제 예정인 버전 용량이 포함되어
+            // 과삭제(over-delete) 방지:
             //           quota 초과가 실제보다 크게 판단됨 → 불필요한 추가 삭제 발생
-            //   변경 후: toDeleteSet에 이미 포함된 버전의 size를 제외한 실효 용량으로 판단
             size_t totalSize = 0;
             for (const auto& version : versions) {
                 std::string vid = version.at("version_id");
@@ -3980,12 +4536,12 @@ public:
 
             size_t quotaLimit = getQuotaLimit();
             if (totalSize > quotaLimit) {
-                // 02/10 - size_t underflow 방지: 3개 미만이면 정리 대상 없음
+                // size_t underflow 방지: 3개 미만이면 정리 대상 없음
                 if (versions.size() >= 3) {
                     // int 캐스팅으로 unsigned underflow 방지
                     for (int i = static_cast<int>(versions.size()) - 1; i >= 2 && totalSize > quotaLimit; i--) {
-                        auto versionId = versions[i].at("version_id");  // 03/18 - DB에서 직접 조회
-                        // 03/05 - unordered_set::find로 중복 체크 O(1) (기존: std::find O(n))
+                        auto versionId = versions[i].at("version_id");  // DB에서 직접 조회
+                        // unordered_set::find로 중복 체크 O(1) (기존: std::find O(n))
                         if (toDeleteSet.find(versionId) == toDeleteSet.end()) {
                             toDeleteSet.insert(versionId);
                             totalSize -= std::stoull(versions[i].at("size"));
@@ -3996,7 +4552,7 @@ public:
         }
 
         // 5. 버전 삭제 실행 (maps to Storage::expire)
-        // 05/18 - versionId 문자열에서 저장 경로를 추론하지 않고
+        // versionId 문자열에서 저장 경로를 추론하지 않고
         //         앞서 SELECT한 결과에서 storage_key를 룩업한다.
         //         versions 벡터를 한 번 더 순회하여 매핑을 미리 만들어둔다.
         std::unordered_map<std::string, std::string> versionIdToStorageKey;
@@ -4024,8 +4580,17 @@ public:
                 }
             }
 
+            // version_diffs 캐시 정리 (ghost diff 방지)
+            try {
+                db->execute(
+                    "DELETE FROM version_diffs "
+                    "WHERE from_version_id = ? OR to_version_id = ?",
+                    {versionId, versionId}
+                );
+            } catch (...) { /* diff 정리 실패는 무시하고 계속 진행 */ }
+
             // DB에서 삭제 (파일 삭제 성공 후에만 실행)
-            // 03/18 - version_id 기반 삭제 (정확히 해당 버전만 삭제)
+            // version_id 기반 삭제 (정확히 해당 버전만 삭제)
             try {
                 db->execute("DELETE FROM files_versions WHERE version_id = ?", {versionId});
             } catch (const std::exception& e) {
@@ -4053,26 +4618,18 @@ public:
     // 백그라운드 잡 메서드 모음 (Phase ④, 05/06 추가)
     // ------------------------------------------------------------
     // 의사코드 단계: 메서드 본체 (a)는 구현, 자동 실행 인프라 (b)는 주석으로 표시
-    //
     // ───── 자동 실행 인프라 (b) - Java 전환 시 구현 ─────
-    //
     //   메서드별 권장 스케줄 (의사코드 표현):
-    //
     //     scheduledOutboxFlush       : 1분마다 실행
     //         [Java 전환 시] @Scheduled(fixedDelay = 60_000)
-    //
     //     scheduledRetentionCleanup  : 매일 새벽 02시 실행
     //         [Java 전환 시] @Scheduled(cron = "0 0 2 * * ?")
-    //
     //     scheduledExpiredDelegationsCleanup : 매시간 실행
     //         [Java 전환 시] @Scheduled(cron = "0 0 * * * ?")
-    //
     //     scheduledOldNotificationsCleanup : 매주 일요일 03시 실행
     //         [Java 전환 시] @Scheduled(cron = "0 0 3 ? * SUN")
-    //
     //   현재 의사코드에서는 자동 호출 인프라가 없으므로, 외부 CLI/cron이
     //   주기적으로 이 메서드들을 호출한다고 가정. 실제 동작은 Java 전환 시.
-    //
     //   대안 인프라:
     //     - Linux cron: 외부 명령으로 호출
     //     - C++ std::thread + condition_variable: 별도 스레드 폴링
@@ -4343,7 +4900,7 @@ private:
     // 정적 카운터로 고유성 보장
     int uuidCounter = 0;
 
-    // 05/18 - Deprecated:
+    // Deprecated:
     //   기존 versionId = "{fileId}.v{timestamp}_{counter}" 생성에 사용되던 멤버 카운터.
     //   새 ID 정책(version_id = UUID)에서는 사용하지 않는다.
     //   다음 이유로 운영 환경에서 부적합:
@@ -4354,12 +4911,11 @@ private:
     //   더 이상 참조하지 않는다. 향후 정리 시 제거 예정.
     int versionCounter = 0;
 
-    // 05/18 - 프로토타입용 UUID 생성기
+    // 프로토타입용 UUID 생성기
     //   주의: 본 함수는 C++ 의사코드 단계에서 ID 충돌 가능성을 낮추기 위한
     //        임시 구현이며, RFC 4122 표준을 따르는 진짜 UUID가 아니다.
     //        실제 운영에서는 검증된 UUID 라이브러리(libuuid, boost::uuids)
     //        또는 Java 전환 후 java.util.UUID.randomUUID()를 사용해야 한다.
-    //
     //   현재 한계 (발표 시 명시):
     //     - timestamp + 카운터 조합이므로, 멀티스레드 환경에서는
     //       uuidCounter++가 비원자적이라 충돌 가능
@@ -4367,32 +4923,26 @@ private:
     //     - 분산 환경에서는 머신별 카운터가 겹칠 수 있음
     //   → DB의 UNIQUE 제약 (files_versions.PK, uq_file_revision)이
     //      마지막 안전망 역할을 한다.
-    //
     //   형식: "uuid_{timestamp}_{counter}"
     //         예: "uuid_1715990400_42"
     //         실제 UUID(36자)는 아니지만 의사코드 단계에서 식별자 역할은 수행.
     //         스키마 CHAR(36)에는 들어가지만, 실 운영 시 RFC 4122로 교체 필요.
     std::string generateUUID() {
-        // 02/10 - timestamp + 카운터로 빠른 연속 생성에서도 고유성 보장
+        // timestamp + 카운터로 빠른 연속 생성에서도 고유성 보장
         return "uuid_" + std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()
         ).count()) + "_" + std::to_string(uuidCounter++);
     }
 
     // 03/18 수정: versionId에서 타임스탬프 추출
-    //   변경 전: find(".v") → fileId에 ".v"가 포함되면 잘못된 위치에서 파싱
-    //   변경 후: rfind(".v") → 마지막 ".v"를 찾아 안전하게 파싱
     //   기존 포맷: "fileId.v{timestamp}_{counter}" → "{timestamp}" 반환
-    //
-    // 05/18 - Deprecated:
+    // Deprecated:
     //   05/18 ID 정책 개정으로 versionId는 UUID가 되었다.
     //   더 이상 versionId 문자열에서 timestamp/카운터를 추출할 수 없다.
     //   (UUID는 의미 없는 식별자이며, 그것이 본래 의도이다.)
     //   현재 코드에서 호출하는 곳은 없으며, 호환성 위해 정의만 남겨둔다.
-    //
     //   timestamp가 필요한 경우 다음과 같이 DB에서 조회해야 한다:
     //     SELECT `timestamp` FROM files_versions WHERE version_id = ?
-    //
     //   향후 정리 시 본 함수는 제거 예정.
     std::string extractTimestamp(const std::string& versionId) {
         auto pos = versionId.rfind(".v");  // 03/18: find → rfind (fileId에 .v 포함 시 안전)
@@ -4408,11 +4958,10 @@ private:
         return "";
     }
 
-    // 03/13 - APPROVE/REJECT 공통 로직 추출
+    // APPROVE/REJECT 공통 로직 추출
     // 두 case의 구조가 거의 동일하여 코드 중복 제거 목적으로 분리
     // 차이점: DocumentStatus, TAG 상수, 알림 텍스트만 다름
     // APPROVE 전용 후처리(workflowEngine)는 호출부에서 처리
-    //
     // 매개변수:
     //   userId     - 승인/거절 수행자
     //   fileId     - 대상 파일 ID
@@ -4429,9 +4978,7 @@ private:
                                   const char* actionTag,
                                   const std::string& notifySubject,
                                   const std::string& actionVerb) {
-        // newStatus, notifySubject: 현재 최종 상태는 consensusResult 기준으로 재결정하므로
-        // 이 인자들은 실제로 사용되지 않음. 과거 구조의 잔재이며 Java 전환 시 제거 예정.
-        // [전환 시] 함수 시그니처를 (userId, fileId, comment, actionTag, actionVerb)로 단순화
+        // [Java 전환 시] newStatus/notifySubject 파라미터 제거, 시그니처 단순화
         (void)newStatus;
         (void)notifySubject;
 
@@ -4441,11 +4988,9 @@ private:
         //     Transaction 2: setDocumentStatusInternal + approval_rules CLOSED → commit
         //   Transaction 1 commit 이후 Transaction 2가 실패하면 결정 기록과 카운터는 남았는데
         //   문서 상태는 변경되지 않는 불일치가 생길 수 있음.
-        //
         //   또한 중복 결정 확인(priorDecision check)과 순차 승인 확인(sequence check)이
         //   트랜잭션 밖에서 수행되어, 동시 요청 시 경합 가능성이 남아 있음.
         //   (approval_activity UNIQUE(rule_id, user_id) 제약이 DB 차원 방어로 추가됨)
-        //
         //   Java 전환 시 권장 구조:
         //     @Transactional
         //     → approval_rules SELECT ... FOR UPDATE  // 전체 흐름 row lock
@@ -4461,9 +5006,7 @@ private:
         //     → commit 이후 알림/워크플로우 트리거
 
         // 1. 승인/거절 권한 확인
-        // 03/18 - status='OPEN' 조건 추가: 이미 처리 완료(CLOSED)된 규칙은 매칭하지 않음
-        //   변경 전: tag_pending과 file_id만 확인 → 오래된 규칙이 계속 매칭됨
-        //   변경 후: OPEN 상태인 규칙만 매칭 → stale rule 방지
+        // status='OPEN' 조건 추가: 이미 처리 완료(CLOSED)된 규칙은 매칭하지 않음
         auto approverCheck = db->query(
             "SELECT rule_id FROM approval_rule_approvers "
             "WHERE entity_id = ? AND rule_id IN "
@@ -4471,7 +5014,7 @@ private:
             {userId, TAG_UNDER_REVIEW, fileId}
         );
 
-        // 05/06 - Phase ① 위임 권한 체크 (의사코드 99% 보강)
+        // Phase ① 위임 권한 체크 (의사코드 99% 보강)
         //   본인이 직접 승인자가 아니면, 활성 위임을 받은 사용자 중에 승인자가 있는지 확인
         //   delegatedFor: 위임받아 대신 결정하는 경우의 원래 승인자 ID (감사 추적용)
         std::string delegatedFor;  // 빈 문자열 = 본인 승인 권한, 값 있음 = 위임받음
@@ -4498,7 +5041,7 @@ private:
 
         std::string ruleId = approverCheck[0]["rule_id"];
 
-        // 05/06 - Phase A-9 (결정 ④): 같은 승인자 재결정 차단
+        // (결정 ④): 같은 승인자 재결정 차단
         //   같은 승인자가 이미 결정한 경우 두 번째 결정은 거부.
         //   사유: 합의 카운터의 정합성 보장. 마음 변경이 필요하면 cancel 후 재요청.
         //   05/06 위임 보강: 위임받은 경우 위임자(delegatedFor)와 본인(userId)
@@ -4517,9 +5060,9 @@ private:
             return false;
         }
 
-        // 05/06 - Phase A-9: SEQUENTIAL 모드의 경우 본인 차례인지 검증
+        // SEQUENTIAL 모드의 경우 본인 차례인지 검증
         //   sequence_order가 작은 순서부터 진행. 본인보다 앞 순서가 모두 결정된 경우만 통과.
-        // 05/14 - 위임 시나리오 보강: 위임받은 경우 위임자(delegatedFor)의 차례를 검사
+        // 위임 시나리오 보강: 위임받은 경우 위임자(delegatedFor)의 차례를 검사
         //   문제: SEQUENTIAL+위임 시 위임받은 본인은 승인자 명단에 없어
         //         isUserTurnInSequence가 myOrder.empty()로 항상 false 반환 → 결정 영구 거부
         //   해결: delegatedFor 있으면 위임자의 sequence_order 기준으로 차례 판단
@@ -4533,7 +5076,6 @@ private:
         // 2~3. 결정 기록 + 카운터 갱신 + 합의 평가: 트랜잭션으로 묶음
         // 이유: activity INSERT 성공 후 approval_rules UPDATE가 실패하면
         //   카운터가 실제 결정 수보다 적어 합의 판정이 영구적으로 틀려짐
-        //
         // 4순위 (위임 승인 user_id 수정):
         //   이전: approval_activity.user_id = 실제 버튼을 누른 userId (위임자)
         //         → SEQUENTIAL 판정 시 "원래 승인자 A가 결정했는지" 볼 때 B만 보여 오판
@@ -4683,7 +5225,7 @@ private:
         }
 
         // 6. 요청자에게 최종 알림
-        // 05/14 - 알림 발송 경로 일관성 수정
+        // 알림 발송 경로 일관성 수정
         //   문제: notificationService->sendNotification 직접 호출이 Outbox/dedup을 우회
         //         (A-X에서 도입한 신뢰성 인프라가 이 경로에만 적용 안 됨)
         //   해결: notifyStakeholders로 통일. 요청자만 정확히 지정하기 위해 명시 targets 사용
@@ -4698,11 +5240,11 @@ private:
                 : "Your document was rejected";
             std::string notifyBody = "File " + fileId + " has been " + finalActionVerb +
                                      " (consensus reached, last decision by " + userId + ")";
-            // 03/26 - 회의 결정: APPROVE에도 comment 포함
+            // 회의 결정: APPROVE에도 comment 포함
             if (!comment.empty()) {
                 notifyBody += ". Comment: " + comment;
             }
-            // 05/14 - sendNotification 직접 호출 → notifyStakeholders 통합 (Outbox 적용)
+            // sendNotification 직접 호출 → notifyStakeholders 통합 (Outbox 적용)
             std::vector<NotificationTarget> requesterTarget = {{
                 requester[0]["entity_id"],
                 {NotificationChannel::PUSH, NotificationChannel::EMAIL, NotificationChannel::WEB}
@@ -4715,7 +5257,7 @@ private:
         // 7. 승인 규칙 종료는 위 5번 트랜잭션 안에서 처리됨
 
         // 8. 다른 이해관계자에게 broadcast 알림 (Phase A-3 자동 트리거)
-        // 04/30 - 위 6단계의 요청자 1대1 알림과는 별도
+        // 위 6단계의 요청자 1대1 알림과는 별도
         std::string requesterId = requester.empty() ? "" : requester[0]["entity_id"];
         auto stakeholders = getDefaultStakeholders(fileId, "approval_completed");
         std::vector<NotificationTarget> broadcastTargets;
@@ -4835,12 +5377,10 @@ private:
         }
     }
 
-    // 03/05 - 파일의 현재 문서 상태를 태그 기반으로 조회
+    // 파일의 현재 문서 상태를 태그 기반으로 조회
     // 반환: 현재 상태 태그 이름 (예: "draft", "approved")
     //       태그가 없으면 빈 문자열 (새 파일이거나 상태 미지정)
-    // 03/18 - 5회 순회 쿼리 → 단일 JOIN 쿼리로 개선
-    //   변경 전: 태그 5개를 for문으로 순회하며 매번 DB 쿼리 (최대 5회)
-    //   변경 후: JOIN + IN 절로 1회 쿼리
+    // 5회 순회 쿼리 → 단일 JOIN 쿼리로 개선
     //   효과: setDocumentStatus 호출마다 최대 4회 불필요한 쿼리 제거
     //   참고: 실제 성능 차이는 DB 연동 후 체감 가능
     std::string getCurrentStatusTag(const std::string& fileId) {
@@ -4854,21 +5394,18 @@ private:
         return result.empty() ? "" : result[0].at("name");
     }
 
-    // 03/05 - 상태 전이 유효성 검사
+    // 상태 전이 유효성 검사
     // DLP 보안 정책: 허용되지 않은 상태 전이를 API 레벨에서 차단
-    //
-    // 05/06 - Phase A-8: 매트릭스 확정 (4월 합의 사항 반영)
+    // 매트릭스 확정 (4월 합의 사항 반영)
     //   결정 ① UNDER_REVIEW → DRAFT 허용 (CANCEL 흐름 정상 동작 보장, A-7 후속)
     //   결정 ② DEPRECATED → DRAFT 일반 불허, 관리자 권한으로만 (별도 메서드 restoreFromDeprecated)
     //   결정 ③ APPROVED → DRAFT 일반 불허, 오류 수정 한정 허용 (별도 메서드 revertApprovedToDraft)
     //   결정 ④ APPROVED → UNDER_REVIEW 불허 (재승인은 새 버전으로)
     //   결정 ⑤ REJECTED → DEPRECATED 허용 (포기 시나리오)
     //   결정 ⑥ stateTransitionConfig 객체로 커스터마이징 가능
-    //
     // 도입 기업 커스터마이징:
     //   StateTransitionConfig 객체를 setTransitionMatrix()로 채워주면 우선 사용.
     //   미주입 시 기본 매트릭스 사용 (아래 default).
-    //
     // 매트릭스:
     //   (없음)        → DRAFT, UNDER_REVIEW                새 파일 최초 상태 설정
     //   DRAFT         → UNDER_REVIEW, DEPRECATED            검토 요청 또는 폐기
@@ -4877,7 +5414,7 @@ private:
     //   REJECTED      → DRAFT, DEPRECATED                   재작업 또는 포기
     //   DEPRECATED    → (전이 불가)                         관리자 메서드로만 복원
     bool isValidTransition(const std::string& currentTag, const std::string& newTag) {
-        // 05/06 - 커스터마이징 매트릭스 우선 사용 (결정 ⑥)
+        // 커스터마이징 매트릭스 우선 사용 (결정 ⑥)
         if (stateTransitionConfig != nullptr && !stateTransitionConfig->isEmpty()) {
             const auto& custom = stateTransitionConfig->matrix;
             auto it = custom.find(currentTag);
@@ -4914,14 +5451,18 @@ private:
         // 실제 구현에서는 파일 I/O 처리
     }
 
+    // 설계 마커 stub: notifyStakeholders의 배치 트리거 자리표시자
+    // 의사코드에서 항상 true 반환. 실제 조건 평가 로직 없음.
+    // [Java 전환 시] 이 메서드 자체가 필요 없음 — @Scheduled가 대체.
     bool shouldBatchNotifications() {
-        // 알림 배치 처리 여부 결정
-        return true;
+        return true;  // 의사코드 전용: 항상 배치 트리거 경로 진입
     }
 
+    // 설계 마커 stub: 백그라운드 잡 스케줄링 자리표시자
+    // 실제 작업을 수행하지 않는 no-op. jobName은 Java 전환 후 @Scheduled 메서드명에 대응.
+    // [Java 전환 시] processOutboxQueue()에 @Scheduled(fixedDelay=60_000) 적용으로 대체.
     void scheduleBackgroundJob(const std::string& jobName) {
-        // 백그라운드 작업 스케줄링
-        // 실제로는 cron job 또는 큐 시스템 사용
+        (void)jobName;  // 의사코드 전용 no-op — Java @Scheduled가 실제 스케줄링 담당
     }
 
     void sendPushNotification(const std::string& token, const std::string& message) {
@@ -4934,7 +5475,7 @@ private:
         return 10ULL * 1024 * 1024 * 1024;  // 예: 10GB (ULL 접미사로 오버플로우 방지)
     }
 
-    // 03/05 - 버전 나이에 따른 계층적 보존 간격 결정
+    // 버전 나이에 따른 계층적 보존 간격 결정
     // Nextcloud 보존 전략: 오래된 버전일수록 넓은 간격으로 솎아냄
     // 매개변수: versionAge - 현재 시각 기준 버전의 나이 (초)
     // 반환값: 해당 나이 구간에서 보존 간격으로 사용할 값 (초)
@@ -4960,7 +5501,7 @@ private:
         return 604800;  // 1주 이상 → 1주 간격
     }
 
-    // 03/13 - JSON 문자열 이스케이프 헬퍼
+    // JSON 문자열 이스케이프 헬퍼
     // 문제: userId 등에 ", \, 제어문자가 포함되면 JSON이 깨짐
     //       예: userId = "O\"Brien" → {"author":"O"Brien"} (파싱 실패)
     // 해결: JSON 스펙(RFC 8259)에 따라 특수문자를 이스케이프
@@ -4992,17 +5533,81 @@ private:
         return output;
     }
 
-    // 03/13 - 버전 메타데이터 JSON 생성 헬퍼
+    // 버전 메타데이터 JSON 생성 헬퍼
     // 현재는 author 필드만 포함, DLP 연동 시 추가 필드 확장 예정
     // JSON 라이브러리 도입 전까지 escapeJsonString으로 안전하게 조립
     std::string buildVersionMetadataJson(const std::string& userId) {
         return "{\"author\":\"" + escapeJsonString(userId) + "\"}";
     }
 
+    // parseJson: 단순 평면 JSON 객체 파서 (기존 stub 교체)
+    // 지원: {"key": "value"} 형식의 평면 문자열/비문자열 키-값
+    // 미지원: 중첩 객체 {"dlp": {...}} — DLP 연동 시 nlohmann/json 또는 Jackson으로 교체
+    // [Java 전환 시] ObjectMapper.readValue(json, new TypeReference<Map<String,String>>(){})
     std::map<std::string, std::string> parseJson(const std::string& json) {
-        // JSON 문자열 파싱
         std::map<std::string, std::string> result;
-        // 실제 구현에서는 JSON 파서 사용
+        if (json.empty() || json.front() != '{') return result;
+
+        size_t pos = 1;
+
+        auto skipWS = [&]() {
+            while (pos < json.size() && std::isspace(static_cast<unsigned char>(json[pos])))
+                ++pos;
+        };
+
+        // 이스케이프를 처리하며 '"' 안의 문자열 읽기 (여는 '"'은 호출 전 확인)
+        auto readString = [&]() -> std::string {
+            ++pos;  // 여는 '"'
+            std::string s;
+            while (pos < json.size() && json[pos] != '"') {
+                if (json[pos] == '\\' && pos + 1 < json.size()) {
+                    ++pos;
+                    switch (json[pos]) {
+                        case '"':  s += '"';  break;
+                        case '\\': s += '\\'; break;
+                        case 'n':  s += '\n'; break;
+                        case 'r':  s += '\r'; break;
+                        case 't':  s += '\t'; break;
+                        case 'b':  s += '\b'; break;
+                        case 'f':  s += '\f'; break;
+                        default:   s += json[pos]; break;
+                    }
+                } else {
+                    s += json[pos];
+                }
+                ++pos;
+            }
+            if (pos < json.size()) ++pos;  // 닫는 '"'
+            return s;
+        };
+
+        while (pos < json.size()) {
+            skipWS();
+            if (pos >= json.size() || json[pos] == '}') break;
+            if (json[pos] == ',') { ++pos; continue; }
+            if (json[pos] != '"') break;
+
+            std::string key = readString();
+
+            skipWS();
+            if (pos >= json.size() || json[pos] != ':') break;
+            ++pos;
+            skipWS();
+
+            std::string value;
+            if (pos < json.size() && json[pos] == '"') {
+                value = readString();
+            } else {
+                // 숫자, bool, null 등 비문자열 값 — 문자열로 읽어 저장
+                while (pos < json.size() && json[pos] != ',' && json[pos] != '}') {
+                    if (!std::isspace(static_cast<unsigned char>(json[pos])))
+                        value += json[pos];
+                    ++pos;
+                }
+            }
+
+            if (!key.empty()) result[key] = value;
+        }
         return result;
     }
 };

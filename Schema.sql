@@ -76,7 +76,7 @@ COMMENT='문서 master 테이블 (RD-SRS-9.1)';
 --   applyVersionRetentionPolicy → SELECT (version_id, file_id, `timestamp`,
 --                                         size, storage_key),
 --                                 DELETE (version_id)
---
+--f
 -- 05/18 - ID 정책:
 --   version_id    : UUID. 내부 식별자. 외부 노출/FK용. 의미 없음(=보안상 좋은 성질)
 --   file_id       : UUID. documents.file_id 참조
