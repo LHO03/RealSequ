@@ -1,0 +1,41 @@
+package com.docversion.mapper;
+
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+
+import java.util.Map;
+
+/**
+ * documents 테이블 매퍼. C++ DatabaseConnection을 통한 documents 접근의 직역.
+ * SQL은 resources/mapper/DocumentMapper.xml에 둔다(기존 prepared statement 보존).
+ */
+@Mapper
+public interface DocumentMapper {
+
+    /**
+     * 문서 master INSERT (createInitialVersion).
+     */
+    int insertDocument(@Param("fileId") String fileId,
+                       @Param("ownerUserId") String ownerUserId,
+                       @Param("currentPath") String currentPath,
+                       @Param("originalName") String originalName,
+                       @Param("currentVersionId") String currentVersionId,
+                       @Param("currentRevisionNo") long currentRevisionNo,
+                       @Param("createdAt") long createdAt,
+                       @Param("updatedAt") long updatedAt);
+
+    /**
+     * 라이브 포인터 조회 + row lock (onDocumentModified).
+     * SELECT ... FOR UPDATE — 트랜잭션 안에서만 lock 유효.
+     * 반환: {current_version_id, current_revision_no} 또는 null(문서 없음).
+     */
+    Map<String, Object> findLivePointerForUpdate(@Param("fileId") String fileId);
+
+    /**
+     * 라이브 포인터 갱신 (onDocumentModified): current_version_id/revision_no/updated_at.
+     */
+    int updateLivePointer(@Param("fileId") String fileId,
+                          @Param("currentVersionId") String currentVersionId,
+                          @Param("currentRevisionNo") long currentRevisionNo,
+                          @Param("updatedAt") long updatedAt);
+}

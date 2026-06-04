@@ -1,0 +1,59 @@
+# ============================================================
+# compose.yaml — 독립 실행 데모 구성 (Nextcloud 미연동)
+#   app     : 버전관리 API (Dockerfile로 컨테이너 안에서 빌드)
+#   mariadb : MariaDB 10.11 LTS (Flyway가 기동 시 스키마 자동 적용)
+#   adminer : DB 웹 뷰어 (versions/diffs 적재 결과를 눈으로 확인 — 데모/보고서용)
+#
+# 실행:  docker compose up --build
+# 정지:  docker compose down       (데이터 유지)
+#        docker compose down -v    (DB·저장소 볼륨까지 삭제, 초기화)
+# ============================================================
+
+services:
+  mariadb:
+    image: mariadb:10.11
+    environment:
+      MARIADB_DATABASE: nextcloud
+      MARIADB_USER: nextcloud
+      MARIADB_PASSWORD: nextcloud
+      MARIADB_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"            # 호스트에서 직접 접속하고 싶을 때 (선택)
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    healthcheck:               # MariaDB가 준비될 때까지 app이 기다리도록
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      mariadb:
+        condition: service_healthy   # DB가 healthy가 된 뒤에 기동
+    environment:
+      # 컨테이너 네트워크에서 DB 호스트는 서비스명(mariadb).
+      # 아래 SPRING_* 환경변수가 application.yml의 기본값을 덮어쓴다.
+      SPRING_DATASOURCE_URL: "jdbc:mariadb://mariadb:3306/nextcloud?useUnicode=true&characterEncoding=utf8mb4"
+      SPRING_DATASOURCE_USERNAME: nextcloud
+      SPRING_DATASOURCE_PASSWORD: nextcloud
+      # 버전 스냅샷 저장 경로 (볼륨에 영속 → 재시작해도 이전 버전 콘텐츠 유지)
+      DOCVERSION_STORAGE_BASE_PATH: /data/storage
+    ports:
+      - "8080:8080"
+    volumes:
+      - app-storage:/data/storage
+
+  adminer:
+    image: adminer:latest
+    depends_on:
+      - mariadb
+    ports:
+      - "8081:8080"            # http://localhost:8081 (Server=mariadb, 계정 nextcloud/nextcloud)
+
+volumes:
+  mariadb-data:
+  app-storage:
