@@ -76,7 +76,7 @@ COMMENT='문서 master 테이블 (RD-SRS-9.1)';
 --   applyVersionRetentionPolicy → SELECT (version_id, file_id, `timestamp`,
 --                                         size, storage_key),
 --                                 DELETE (version_id)
---f
+--
 -- 05/18 - ID 정책:
 --   version_id    : UUID. 내부 식별자. 외부 노출/FK용. 의미 없음(=보안상 좋은 성질)
 --   file_id       : UUID. documents.file_id 참조
@@ -455,12 +455,18 @@ CREATE TABLE notification_outbox (
     user_id         VARCHAR(255)    NOT NULL    COMMENT '수신자 ID',
     channel         VARCHAR(16)     NOT NULL    COMMENT '발송 채널 (PUSH | EMAIL | WEB)',
     payload         TEXT            NOT NULL    COMMENT '발송 본문 (메시지 텍스트)',
-    status          VARCHAR(16)     NOT NULL    DEFAULT 'PENDING' COMMENT 'PENDING | SENT | DLQ',
+    status          VARCHAR(16)     NOT NULL    DEFAULT 'PENDING' COMMENT 'PENDING | PROCESSING | SENT | DLQ',
     retry_count     INT             NOT NULL    DEFAULT 0 COMMENT '현재까지 재시도 횟수',
     retry_after     BIGINT          NOT NULL    COMMENT '다음 재시도 시각 (Unix timestamp)',
     last_error      TEXT            DEFAULT NULL COMMENT '마지막 실패 사유',
     created_at      BIGINT          NOT NULL    COMMENT '큐 등록 시각',
     sent_at         BIGINT          DEFAULT NULL COMMENT '발송 완료 시각 (status=SENT일 때만)',
+    -- 05/XX - 멀티 Worker 안전성: PROCESSING 상태 + claim lock
+    --   processOutboxQueue가 row를 가져갈 때 PENDING → PROCESSING으로 UPDATE(claim)하고
+    --   locked_by에 자신의 worker ID를 기록. 이후 locked_by 기준으로 본인 row만 처리.
+    --   stale lock(5분 이상 PROCESSING 유지) 감지 시 PENDING으로 복원.
+    locked_by       VARCHAR(36)     DEFAULT NULL COMMENT 'claim한 Worker ID (UUID). NULL=미잠금',
+    locked_at       BIGINT          DEFAULT NULL COMMENT 'claim 시각 (stale lock 감지용, Unix timestamp)',
 
     PRIMARY KEY (id),
     INDEX idx_status_retry (status, retry_after),
