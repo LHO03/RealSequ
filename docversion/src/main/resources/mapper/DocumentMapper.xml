@@ -32,4 +32,14 @@
         WHERE file_id = #{fileId}
     </update>
 
+    <!-- 업로드 시 (소유자+경로)로 기존 문서 찾기 (Nextcloud식 "같은 경로 = 같은 문서").
+         soft delete 제외. idx_documents_owner_path 활용. -->
+    <select id="findFileIdByOwnerAndPath" resultType="string">
+        SELECT file_id FROM documents
+        WHERE owner_user_id = #{ownerUserId}
+          AND current_path = #{currentPath}
+          AND deleted_at IS NULL
+        LIMIT 1
+    </select>
+
 </mapper>

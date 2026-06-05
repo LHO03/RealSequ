@@ -38,14 +38,17 @@ public class VersionLifecycleListener {
         this.storage = storage;
     }
 
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    // fallbackExecution=true: 이벤트가 트랜잭션 밖에서 발행돼도 리스너를 실행한다.
+    // (onDocumentModified는 쓰기 트랜잭션이 끝난 뒤 이벤트를 발행하므로, 이 옵션이 없으면
+    //  Spring이 "활성 트랜잭션 없음"으로 리스너를 조용히 건너뛴다 → diff 캐시 미적재 버그)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onVersionCreated(VersionEvents.VersionCreated event) {
         // 최초 버전: 이전 버전이 없으므로 diff 없음. 알림 seam만.
         notifyStakeholders(event.fileId(), "version_created",
                 "Initial version created by " + event.userId());
     }
 
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onVersionUpdated(VersionEvents.VersionUpdated event) {
         // 10. diff 캐시 계산 및 저장 (실패해도 버전은 이미 확정)
         try {

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.docversion.mapper.ApprovalMapper">
+
+    <!-- 승인 요청 생성: OPEN + open_marker=file_id.
+         같은 문서에 OPEN이 이미 있으면 uq_open_per_file 위반으로 INSERT 실패(예외). -->
+    <insert id="insertRequest">
+        INSERT INTO approval_requests
+            (id, file_id, requester_id, approver_id, status, open_marker, created_at)
+        VALUES
+            (#{id}, #{fileId}, #{requesterId}, #{approverId}, 'OPEN', #{fileId}, #{createdAt})
+    </insert>
+
+    <!-- 문서의 현재 OPEN 요청 -->
+    <select id="findOpenByFile" resultType="map">
+        SELECT id, file_id AS fileId, requester_id AS requesterId,
+               approver_id AS approverId, status, created_at AS createdAt
+        FROM approval_requests
+        WHERE file_id = #{fileId} AND status = 'OPEN'
+        LIMIT 1
+    </select>
+
+    <!-- 요청 ID로 조회 -->
+    <select id="findById" resultType="map">
+        SELECT id, file_id AS fileId, requester_id AS requesterId,
+               approver_id AS approverId, status,
+               created_at AS createdAt, decided_at AS decidedAt
+        FROM approval_requests
+        WHERE id = #{id}
+    </select>
+
+    <!-- 요청 닫기(판정): OPEN인 것만. open_marker를 NULL로 풀어 다음 요청 허용. -->
+    <update id="closeRequest">
+        UPDATE approval_requests
+        SET status = #{status},
+            open_marker = NULL,
+            decided_at = #{decidedAt}
+        WHERE id = #{id} AND status = 'OPEN'
+    </update>
+
+    <!-- 판정 이력 기록 -->
+    <insert id="insertActivity">
+        INSERT INTO approval_activity
+            (request_id, actor_id, action, comment, `timestamp`)
+        VALUES
+            (#{requestId}, #{actorId}, #{action}, #{comment}, #{timestamp})
+    </insert>
+
+    <!-- 문서의 승인 요청 이력(최신순) -->
+    <select id="listByFile" resultType="map">
+        SELECT id, requester_id AS requesterId, approver_id AS approverId,
+               status, created_at AS createdAt, decided_at AS decidedAt
+        FROM approval_requests
+        WHERE file_id = #{fileId}
+        ORDER BY created_at DESC, id DESC
+    </select>
+
+</mapper>

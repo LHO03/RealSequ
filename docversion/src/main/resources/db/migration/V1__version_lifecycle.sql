@@ -27,7 +27,10 @@ CREATE TABLE IF NOT EXISTS documents (
     deleted_at          BIGINT          DEFAULT NULL COMMENT '삭제 시각(soft delete)',
 
     PRIMARY KEY (file_id),
-    INDEX idx_documents_owner_path (owner_user_id, current_path),
+    -- current_path가 VARCHAR(1024)+utf8mb4(4byte/char)라 전체 인덱싱 시
+    -- InnoDB 키 길이 한계(3072byte)를 초과 → 앞 255자만 prefix index.
+    -- (원본 Schema.sql의 잠복 결함. 실제 MariaDB 적용 시 표면화되어 수정)
+    INDEX idx_documents_owner_path (owner_user_id, current_path(255)),
     INDEX idx_documents_current_version (current_version_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='문서 master 테이블 (RD-SRS-9.1)';

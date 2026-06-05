@@ -32,6 +32,13 @@ public interface DocumentMapper {
     Map<String, Object> findLivePointerForUpdate(@Param("fileId") String fileId);
 
     /**
+     * (소유자 + 경로)로 기존 문서의 file_id 조회. Nextcloud식 "같은 경로면 같은 문서" 판정용.
+     * idx_documents_owner_path 인덱스 활용. 없으면 null.
+     */
+    String findFileIdByOwnerAndPath(@Param("ownerUserId") String ownerUserId,
+                                    @Param("currentPath") String currentPath);
+
+    /**
      * 라이브 포인터 갱신 (onDocumentModified): current_version_id/revision_no/updated_at.
      */
     int updateLivePointer(@Param("fileId") String fileId,

@@ -30,3 +30,8 @@ mybatis:
 logging:
   level:
     com.docversion.mapper: debug   # 개발 중 실행 SQL 확인 (parity 대조용)
+
+# 상태 전이 거부 등의 메시지를 응답 본문에 포함 (화면에서 사유 표시용)
+server:
+  error:
+    include-message: always
