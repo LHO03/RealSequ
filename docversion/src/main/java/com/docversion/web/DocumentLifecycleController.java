@@ -6,6 +6,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.security.Principal;
 import java.util.List;
 import java.util.Map;
 
@@ -34,14 +35,14 @@ public class DocumentLifecycleController {
         }
     }
 
-    /** 상태 변경. 허용되지 않은 전이는 409로 거부하고 사유를 메시지로 돌려준다. */
+    /** 상태 변경. 변경자 = 로그인 사용자. 허용되지 않은 전이는 409로 거부하고 사유를 메시지로 돌려준다. */
     @PostMapping("/{fileId}/status")
-    public StatusView changeStatus(@PathVariable String fileId,
-                                   @RequestParam String userId,
+    public StatusView changeStatus(Principal principal,
+                                   @PathVariable String fileId,
                                    @RequestParam String targetStatus,
                                    @RequestParam(required = false) String reason) {
         try {
-            return service.changeStatus(fileId, userId, targetStatus, reason);
+            return service.changeStatus(fileId, principal.getName(), targetStatus, reason);
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         } catch (IllegalStateException e) {

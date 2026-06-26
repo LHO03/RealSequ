@@ -192,14 +192,26 @@
     <div class="status"><span class="dot" id="hdot"></span><span id="hstat">연결 확인 중…</span></div>
   </header>
 
+  <div id="authbar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 18px;padding:12px 16px;border:1px solid var(--line);border-radius:12px;background:var(--paper)">
+    <span style="font-size:12px;color:var(--gold);letter-spacing:.05em">인증 · 1단계</span>
+    <span id="auth-state" style="font-size:13px;color:var(--ink-soft)">확인 중…</span>
+    <span id="auth-login" style="display:none;gap:8px;align-items:center">
+      <input type="text" id="auth-user" placeholder="아이디" style="width:120px">
+      <input type="password" id="auth-pw" placeholder="비밀번호" style="width:130px">
+      <button id="auth-btn">로그인</button>
+      <span class="hint" style="margin:0">데모: alice/alice123 · admin/admin123</span>
+    </span>
+    <button class="ghost" id="auth-logout" style="display:none">로그아웃</button>
+  </div>
+
   <div class="grid">
 
     <!-- 1. 파일 업로드 -->
     <section class="card">
       <div class="sec-head"><span class="sec-num">1</span><h2>파일 업로드</h2><span class="rd">9.1 · 9.2</span></div>
       <div class="field">
-        <label>작성자 (userId)</label>
-        <input type="text" id="c-user" value="alice">
+        <label>작성자</label>
+        <div id="c-user-state" class="hint" style="margin:0;padding:10px 0">로그인하면 작성자가 자동으로 채워집니다.</div>
       </div>
       <div class="field">
         <label>폴더 (folder · 선택)</label>
@@ -269,9 +281,7 @@
 
       <h3 style="font-family:Fraunces,serif;font-weight:500;font-size:15px;margin:26px 0 10px">승인 워크플로 <span style="font-size:11px;color:var(--gold)">9.7</span></h3>
       <div class="row" style="margin-bottom:10px;align-items:center">
-        <label style="margin:0">현재 사용자</label>
-        <input type="text" id="ap-actor" style="width:130px" placeholder="예: bob">
-        <span style="font-size:12px;color:var(--ink-soft)">— 이 사용자로서 요청/승인/반려합니다. (자기 승인 금지)</span>
+        <span id="ap-actor-state" class="hint" style="margin:0">요청·승인·반려는 <b>로그인한 사용자</b>로 수행됩니다. (자기 승인 금지)</span>
       </div>
       <div id="ap-panel" style="margin-bottom:12px"></div>
       <table style="margin-top:4px">
@@ -282,8 +292,8 @@
       <h3 style="font-family:Fraunces,serif;font-weight:500;font-size:15px;margin:26px 0 10px">구독자 (이해관계자) <span style="font-size:11px;color:var(--gold)">9.9</span></h3>
       <div class="row">
         <span id="sub-list" class="hint" style="flex:1;margin:0">—</span>
-        <input type="text" id="sub-user" placeholder="구독자 추가 (예: carol)" style="width:170px">
-        <button class="ghost" id="sub-btn">구독</button>
+        <button class="ghost" id="sub-btn">이 문서 구독</button>
+        <button class="ghost" id="unsub-btn">구독 해제</button>
       </div>
     </section>
 
@@ -291,12 +301,11 @@
     <section class="card full" id="notif-card">
       <div class="sec-head"><span class="sec-num">4</span><h2>알림</h2><span class="rd">9.9</span></div>
       <div class="row" style="margin-bottom:14px;align-items:center">
-        <label style="margin:0">사용자</label>
-        <input type="text" id="nf-user" style="width:140px" placeholder="예: bob">
-        <button id="nf-load">알림 조회</button>
+        <span id="nf-user-state" class="hint" style="flex:1;margin:0">로그인하면 내 알림을 볼 수 있습니다.</span>
+        <button id="nf-load">내 알림 조회</button>
         <span id="nf-unread" class="chip del" style="display:none"></span>
       </div>
-      <div id="nf-list"><p class="empty">사용자를 입력하고 조회하세요.</p></div>
+      <div id="nf-list"><p class="empty">로그인 후 조회하세요.</p></div>
 
       <h3 style="font-family:Fraunces,serif;font-weight:500;font-size:15px;margin:26px 0 8px">발송 아웃박스</h3>
       <p class="hint" style="margin-top:0">업무 변경과 <b>같은 트랜잭션</b>으로 적재되는 발송 큐입니다. 워커가 5초마다 PENDING을 처리해 SENT로 바꿉니다. (실제 발송은 모의 처리)</p>
@@ -305,6 +314,31 @@
         <tbody id="ob-body"><tr><td colspan="6" class="empty">—</td></tr></tbody>
       </table>
       <button class="ghost" id="ob-load" style="margin-top:8px">아웃박스 새로고침</button>
+    </section>
+
+    <!-- 5. 보존 정책 -->
+    <section class="card full" id="retention-card">
+      <div class="sec-head"><span class="sec-num">5</span><h2>보존 정책</h2><span class="rd">9.10</span></div>
+      <p class="hint" style="margin-top:0">버전을 얼마 동안 / 몇 개까지 보관할지 정합니다. 한도를 넘은 오래된 버전은 정리되며, <b>문서의 현재 버전은 절대 삭제되지 않습니다.</b> 활성 정책은 60초마다 자동 적용됩니다.</p>
+      <div class="row" style="margin:12px 0;align-items:center;flex-wrap:wrap;gap:8px">
+        <select id="rt-scope">
+          <option value="GLOBAL">전체(GLOBAL)</option>
+          <option value="USER">사용자(USER)</option>
+          <option value="FOLDER">폴더(FOLDER)</option>
+          <option value="FILE">파일(FILE)</option>
+        </select>
+        <input type="text" id="rt-scopeid" placeholder="대상 식별자 (USER=ID · FOLDER=경로 · FILE=fileId)" style="width:280px">
+        <input type="number" id="rt-maxver" placeholder="최대 버전 수" style="width:110px" min="0">
+        <input type="number" id="rt-maxdays" placeholder="최대 보관일" style="width:110px" min="0">
+        <input type="number" id="rt-mindays" placeholder="최소 보관일" style="width:110px" min="0">
+        <label style="margin:0;font-size:13px"><input type="checkbox" id="rt-auto" checked> 자동 정리</label>
+        <button id="rt-create">정책 생성</button>
+      </div>
+      <table style="margin-top:4px">
+        <thead><tr><th>범위</th><th>대상</th><th>최대버전</th><th>최대일</th><th>최소일</th><th>자동</th><th>상태</th><th></th></tr></thead>
+        <tbody id="rtbody"><tr><td colspan="8" class="empty">등록된 보존 정책이 없습니다.</td></tr></tbody>
+      </table>
+      <button class="ghost" id="rt-load" style="margin-top:8px">정책 새로고침</button>
     </section>
 
   </div>
@@ -319,6 +353,7 @@
 
 <script>
 const API = "/api/documents";
+let currentUser = null;   // 로그인한 사용자 (인증 2단계). null=비로그인
 const STATUS_LABELS = { DRAFT:"초안", UNDER_REVIEW:"검토중", APPROVED:"승인", REVISION_DRAFT:"수정본 초안", DEPRECATED:"폐기" };
 const REQ_LABELS = { OPEN:"대기", APPROVED:"승인됨", REJECTED:"반려됨", CANCELLED:"취소됨" };
 const reqLabel = (s) => REQ_LABELS[s] || s || "—";
@@ -364,18 +399,18 @@ document.getElementById("c-file").onchange=e=>{
 document.getElementById("c-btn").onclick=async()=>{
   const f=document.getElementById("c-file").files[0];
   if(!f){ toast("파일을 먼저 선택하세요",true); return; }
-  const user=document.getElementById("c-user").value||"alice";
+  if(!currentUser){ toast("업로드하려면 먼저 로그인하세요",true); return; }
   const fd=new FormData();
-  fd.append("userId",user);
   fd.append("folder",document.getElementById("c-folder").value||"");
   fd.append("file",f);
   try{
     const r=await fetch(`${API}/upload`,{method:"POST",body:fd});
+    if(r.status===401){ toast("로그인이 필요합니다",true); return; }
     if(!r.ok) throw new Error("HTTP "+r.status);
     const o=await r.json();           // {created, path, fileId, version}
     let d=docs.find(x=>x.fileId===o.fileId);
     if(d){ d.rev=o.version.revisionNo; d.path=o.path; }
-    else { d={fileId:o.fileId, path:o.path, user:user, rev:o.version.revisionNo}; docs.unshift(d); }
+    else { d={fileId:o.fileId, path:o.path, user:currentUser, rev:o.version.revisionNo}; docs.unshift(d); }
     save(); renderDocs(); selectDoc(o.fileId);
     toast(o.created ? ("새 문서 생성 · "+o.path) : ("새 버전 "+o.version.revisionNo+" · "+o.path));
   }catch(err){ toast("업로드 실패: "+err.message,true); }
@@ -403,9 +438,11 @@ document.getElementById("m-btn").onclick=async()=>{
   const f=document.getElementById("m-file").files[0];
   if(!f){ toast("수정본 파일을 선택하세요",true); return; }
   const d=docs.find(x=>x.fileId===active);
-  const fd=new FormData(); fd.append("userId",d.user||"alice"); fd.append("file",f);
+  if(!currentUser){ toast("새 버전을 올리려면 먼저 로그인하세요",true); return; }
+  const fd=new FormData(); fd.append("file",f);
   try{
     const r=await fetch(`${API}/${active}/versions`,{method:"POST",body:fd});
+    if(r.status===401){ toast("로그인이 필요합니다",true); return; }
     if(!r.ok) throw new Error("HTTP "+r.status);
     const v=await r.json();
     if(v.empty){ toast("문서를 찾을 수 없습니다",true); return; }
@@ -420,7 +457,7 @@ document.getElementById("r-btn").onclick=loadVersions;
 let versions=[];
 async function loadVersions(){
   const d=docs.find(x=>x.fileId===active);
-  const r=await fetch(`${API}/${active}/versions?userId=${encodeURIComponent(d.user||"alice")}`);
+  const r=await fetch(`${API}/${active}/versions`);
   versions=await r.json();
   const tb=document.getElementById("vbody"); tb.innerHTML="";
   versions.forEach(v=>{
@@ -493,14 +530,14 @@ document.getElementById("st-btn").onclick=async()=>{
   if(!active) return;
   const target=document.getElementById("st-target").value;
   if(!target){ return; }
-  const d=docs.find(x=>x.fileId===active);
+  if(!currentUser){ toast("상태를 변경하려면 먼저 로그인하세요",true); return; }
   const reason=document.getElementById("st-reason").value||"";
   const fd=new FormData();
-  fd.append("userId", d.user||"alice");
   fd.append("targetStatus", target);
   fd.append("reason", reason);
   try{
     const r=await fetch(`${API}/${active}/status`,{method:"POST",body:fd});
+    if(r.status===401){ toast("로그인이 필요합니다",true); return; }
     const v=await r.json();
     if(!r.ok){ toast(v.message || ("상태 변경 실패: HTTP "+r.status), true); return; }
     document.getElementById("st-reason").value="";
@@ -529,27 +566,22 @@ async function loadStatusHistory(){
 
 /* ---------- 승인 워크플로 (9.7) ---------- */
 async function apPost(path){
-  const actor=(document.getElementById("ap-actor").value||"").trim();
-  if(!actor){ toast("현재 사용자를 입력하세요",true); return null; }
+  if(!currentUser){ toast("로그인이 필요합니다",true); return null; }
   const fd=new FormData();
   const cmt=document.getElementById("ap-comment");
   if(path==="request"){
     const approver=(document.getElementById("ap-approver").value||"").trim();
     if(!approver){ toast("승인자를 지정하세요",true); return null; }
-    fd.append("requesterId",actor); fd.append("approverId",approver);
-  }else{
-    fd.append("actorId",actor);
+    fd.append("approverId",approver);
   }
   if(cmt && cmt.value) fd.append("comment",cmt.value);
   const r=await fetch(`${API}/${active}/approval/${path}`,{method:"POST",body:fd});
+  if(r.status===401){ toast("로그인이 필요합니다",true); return null; }
   const v=await r.json();
   if(!r.ok){ toast(v.message || ("처리 실패: HTTP "+r.status), true); return null; }
   return v;
 }
 async function loadApproval(){
-  const d=docs.find(x=>x.fileId===active);
-  const actorInput=document.getElementById("ap-actor");
-  if(!actorInput.value) actorInput.value=d?(d.user||"alice"):"alice";
   const panel=document.getElementById("ap-panel");
   let state;
   try{ const r=await fetch(`${API}/${active}/approval`); state=await r.json(); }
@@ -607,26 +639,34 @@ async function loadSubscribers(){
 }
 document.getElementById("sub-btn").onclick=async()=>{
   if(!active) return;
-  const u=(document.getElementById("sub-user").value||"").trim();
-  if(!u){ toast("구독자 ID를 입력하세요",true); return; }
-  const fd=new FormData(); fd.append("userId",u);
+  if(!currentUser){ toast("구독하려면 먼저 로그인하세요",true); return; }
   try{
-    const r=await fetch(`${API}/${active}/subscribe`,{method:"POST",body:fd});
+    const r=await fetch(`${API}/${active}/subscribe`,{method:"POST"});
+    if(r.status===401){ toast("로그인이 필요합니다",true); return; }
     if(!r.ok) throw new Error("HTTP "+r.status);
-    document.getElementById("sub-user").value="";
-    toast(u+" 구독 추가됨"); await loadSubscribers();
+    toast(currentUser+" 구독 추가됨"); await loadSubscribers();
   }catch(err){ toast("구독 실패: "+err.message,true); }
+};
+document.getElementById("unsub-btn").onclick=async()=>{
+  if(!active) return;
+  if(!currentUser){ toast("먼저 로그인하세요",true); return; }
+  try{
+    const r=await fetch(`${API}/${active}/unsubscribe`,{method:"POST"});
+    if(r.status===401){ toast("로그인이 필요합니다",true); return; }
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    toast(currentUser+" 구독 해제됨"); await loadSubscribers();
+  }catch(err){ toast("구독 해제 실패: "+err.message,true); }
 };
 
 /* ---------- 알림 (9.9) ---------- */
 document.getElementById("nf-load").onclick=loadNotifications;
 async function loadNotifications(){
-  const user=(document.getElementById("nf-user").value||"").trim();
-  if(!user){ toast("사용자를 입력하세요",true); return; }
+  if(!currentUser){ toast("내 알림을 보려면 먼저 로그인하세요",true); return; }
   const list=document.getElementById("nf-list");
   const badge=document.getElementById("nf-unread");
   try{
-    const r=await fetch(`/api/notifications?userId=${encodeURIComponent(user)}&limit=50`);
+    const r=await fetch(`/api/notifications?limit=50`);
+    if(r.status===401){ toast("로그인이 필요합니다",true); return; }
     const data=await r.json();   // {unread, items}
     badge.style.display="inline-block"; badge.textContent="안 읽음 "+data.unread;
     if(!data.items.length){ list.innerHTML='<p class="empty">알림이 없습니다.</p>'; return; }
@@ -642,8 +682,8 @@ async function loadNotifications(){
         </div>`;
       if(unread){
         const b=document.createElement("button"); b.className="ghost"; b.textContent="읽음"; b.style.flex="none";
-        b.onclick=async()=>{ const fd=new FormData(); fd.append("userId",user);
-          await fetch(`/api/notifications/${n.notificationId}/read`,{method:"POST",body:fd}); loadNotifications(); };
+        b.onclick=async()=>{
+          await fetch(`/api/notifications/${n.notificationId}/read`,{method:"POST"}); loadNotifications(); };
         div.appendChild(b);
       }
       list.appendChild(div);
@@ -671,9 +711,125 @@ async function loadOutbox(){
   }catch(err){ tb.innerHTML='<tr><td colspan="6" class="empty">불러오지 못했습니다.</td></tr>'; }
 }
 
+/* ---------- 보존 정책 (9.10) ---------- */
+const SCOPE_LABELS = { GLOBAL:"전체", USER:"사용자", FOLDER:"폴더", FILE:"파일" };
+document.getElementById("rt-load").onclick=loadPolicies;
+document.getElementById("rt-create").onclick=async()=>{
+  if(!currentUser){ toast("정책을 만들려면 먼저 로그인하세요",true); return; }
+  const scope=document.getElementById("rt-scope").value;
+  const scopeId=(document.getElementById("rt-scopeid").value||"").trim();
+  const fd=new FormData();
+  fd.append("scopeType",scope);
+  if(scope!=="GLOBAL") fd.append("scopeId",scopeId);
+  fd.append("maxVersions",document.getElementById("rt-maxver").value||"0");
+  fd.append("maxDays",document.getElementById("rt-maxdays").value||"0");
+  fd.append("minDays",document.getElementById("rt-mindays").value||"0");
+  fd.append("autoCleanup",document.getElementById("rt-auto").checked);
+  try{
+    const r=await fetch(`/api/retention/policies`,{method:"POST",body:fd});
+    if(r.status===401){ toast("로그인이 필요합니다",true); return; }
+    const v=await r.json();
+    if(!r.ok){ toast(v.message||("정책 생성 실패: HTTP "+r.status),true); return; }
+    toast("보존 정책 생성됨");
+    document.getElementById("rt-scopeid").value="";
+    await loadPolicies();
+  }catch(err){ toast("정책 생성 실패: "+err.message,true); }
+};
+async function loadPolicies(){
+  const tb=document.getElementById("rtbody");
+  try{
+    const r=await fetch(`/api/retention/policies`);
+    const rows=await r.json();
+    if(!rows.length){ tb.innerHTML='<tr><td colspan="8" class="empty">등록된 보존 정책이 없습니다.</td></tr>'; return; }
+    tb.innerHTML="";
+    rows.forEach(p=>{
+      const active = p.isActive==1 || p.isActive===true;
+      const tr=document.createElement("tr");
+      if(!active) tr.style.opacity="0.5";
+      tr.innerHTML=`<td>${SCOPE_LABELS[p.scopeType]||p.scopeType}</td>
+        <td class="mono" style="font-size:11px">${p.scopeId||'—'}</td>
+        <td>${p.maxVersions||'∞'}</td><td>${p.maxDays||'∞'}</td><td>${p.minDays||0}</td>
+        <td>${(p.autoCleanup==1||p.autoCleanup===true)?'예':'아니오'}</td>
+        <td><span class="chip ${active?'add':'del'}" style="font-size:11px">${active?'활성':'비활성'}</span></td>
+        <td></td>`;
+      const cell=tr.lastElementChild;
+      if(active){
+        const ap=document.createElement("button"); ap.className="ghost"; ap.textContent="지금 적용"; ap.style.cssText="flex:none;margin-right:4px";
+        ap.onclick=async()=>{
+          if(!currentUser){ toast("로그인이 필요합니다",true); return; }
+          const r=await fetch(`/api/retention/policies/${p.id}/apply`,{method:"POST"});
+          if(r.status===401){ toast("로그인이 필요합니다",true); return; }
+          const v=await r.json();
+          if(r.ok) toast("정리 완료 · 버전 "+v.deleted+"개 삭제"); else toast(v.message||"적용 실패",true);
+          await loadPolicies(); await loadVersions?.(); };
+        const de=document.createElement("button"); de.className="ghost"; de.textContent="비활성"; de.style.flex="none";
+        de.onclick=async()=>{
+          if(!currentUser){ toast("로그인이 필요합니다",true); return; }
+          const r=await fetch(`/api/retention/policies/${p.id}/deactivate`,{method:"POST"});
+          if(r.status===401){ toast("로그인이 필요합니다",true); return; }
+          toast("정책 비활성화됨"); await loadPolicies(); };
+        cell.appendChild(ap); cell.appendChild(de);
+      }
+      tb.appendChild(tr);
+    });
+  }catch(err){ tb.innerHTML='<tr><td colspan="8" class="empty">불러오지 못했습니다.</td></tr>'; }
+}
+
+/* ---------- 인증 (1단계) ---------- */
+async function loadAuth(){
+  const state=document.getElementById("auth-state");
+  const loginBox=document.getElementById("auth-login");
+  const logoutBtn=document.getElementById("auth-logout");
+  try{
+    const r=await fetch("/api/auth/me");
+    const v=await r.json();
+    if(v.authenticated){
+      currentUser=v.user;
+      state.innerHTML=`현재 로그인: <b>${v.user}</b> <span class="mono" style="font-size:11px;color:var(--ink-soft)">[${(v.roles||[]).join(", ")||"USER"}]</span>`;
+      loginBox.style.display="none"; logoutBtn.style.display="inline-block";
+    }else{
+      currentUser=null;
+      state.textContent="로그인하지 않음";
+      loginBox.style.display="inline-flex"; logoutBtn.style.display="none";
+    }
+    const cu=document.getElementById("c-user-state");
+    if(cu) cu.innerHTML = currentUser
+      ? `작성자: <b>${currentUser}</b> (로그인 사용자)`
+      : '로그인하면 작성자가 자동으로 채워집니다.';
+    const aps=document.getElementById("ap-actor-state");
+    if(aps) aps.innerHTML = currentUser
+      ? `요청·승인·반려는 현재 로그인 사용자 <b>${currentUser}</b>로 수행됩니다. (자기 승인 금지)`
+      : '요청·승인·반려는 <b>로그인한 사용자</b>로 수행됩니다. 먼저 로그인하세요.';
+    const nfs=document.getElementById("nf-user-state");
+    if(nfs) nfs.innerHTML = currentUser
+      ? `현재 로그인 사용자 <b>${currentUser}</b>의 알림입니다.`
+      : '로그인하면 내 알림을 볼 수 있습니다.';
+  }catch(e){ state.textContent="인증 상태 확인 실패"; }
+}
+document.getElementById("auth-btn").onclick=async()=>{
+  const u=document.getElementById("auth-user").value.trim();
+  const p=document.getElementById("auth-pw").value;
+  if(!u||!p){ toast("아이디와 비밀번호를 입력하세요",true); return; }
+  const body=new URLSearchParams(); body.append("username",u); body.append("password",p);
+  try{
+    const r=await fetch("/api/auth/login",{method:"POST",
+      headers:{"Content-Type":"application/x-www-form-urlencoded"},body:body.toString()});
+    const v=await r.json();
+    if(!r.ok){ toast(v.error||"로그인 실패",true); return; }
+    document.getElementById("auth-pw").value="";
+    toast("로그인됨 · "+v.user); await loadAuth();
+  }catch(err){ toast("로그인 실패: "+err.message,true); }
+};
+document.getElementById("auth-logout").onclick=async()=>{
+  try{ await fetch("/api/auth/logout",{method:"POST"}); toast("로그아웃됨"); await loadAuth(); }
+  catch(err){ toast("로그아웃 실패: "+err.message,true); }
+};
+
 /* ---------- init ---------- */
 health(); setInterval(health,8000);
+loadAuth();
 renderDocs();
+loadPolicies();
 if(docs.length && docs[0]) selectDoc(docs[0].fileId);
 </script>
 </body>
