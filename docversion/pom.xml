@@ -28,6 +28,26 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
+        <!-- 알림 이메일 실발송 (RD-SRS-9.9 외부 채널) — SMTP(JavaMailSender) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
+
+        <!-- 텍스트 추출 (RD-SRS-9.4) — PDF·Word·Excel 등 바이너리 문서의 텍스트 diff.
+             tika-core: 추출 프레임워크 / parsers-standard-package: 표준 형식 해석기 묶음.
+             HWP는 미지원(지원 예정 — hwplib 등 전용 구현체 추가 자리는 seam으로 확보됨). -->
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-core</artifactId>
+            <version>2.9.2</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-parsers-standard-package</artifactId>
+            <version>2.9.2</version>
+        </dependency>
+
         <!-- 인증·인가 (RD 후속: 세션 기반 로그인) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

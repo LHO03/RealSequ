@@ -1,14 +1,11 @@
 package com.docversion.service;
 
 import com.docversion.domain.VersionInfo;
-import com.docversion.mapper.ActivityMapper;
 import com.docversion.mapper.DocumentMapper;
 import com.docversion.mapper.FilesVersionMapper;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -24,17 +21,17 @@ public class VersionWriteService {
 
     private final DocumentMapper documentMapper;
     private final FilesVersionMapper filesVersionMapper;
-    private final ActivityMapper activityMapper;
-    private final ObjectMapper objectMapper;
+    private final AuditLogService audit; // 목표 간극(나): 이력 기록은 AuditLogService로 일원화
+    private final NotificationService notifications; // 목표 간극(가): 업로드 시 이해관계자 알림
 
     public VersionWriteService(DocumentMapper documentMapper,
                                FilesVersionMapper filesVersionMapper,
-                               ActivityMapper activityMapper,
-                               ObjectMapper objectMapper) {
+                               AuditLogService audit,
+                               NotificationService notifications) {
         this.documentMapper = documentMapper;
         this.filesVersionMapper = filesVersionMapper;
-        this.activityMapper = activityMapper;
-        this.objectMapper = objectMapper;
+        this.audit = audit;
+        this.notifications = notifications;
     }
 
     /**
@@ -51,8 +48,9 @@ public class VersionWriteService {
 
         filesVersionMapper.insertVersion(version);
 
-        logChangeHistory(version.getUserId(), version.getFileId(),
-                "version_created", "revision_no=1", version.getVersionId());
+        setMetadataReason(version.getVersionId(), "revision_no=1");
+        audit.record(version.getUserId(), version.getFileId(),
+                "version_created", version.getVersionId(), Map.of("reason", "revision_no=1"));
     }
 
     /**
@@ -85,43 +83,28 @@ public class VersionWriteService {
         documentMapper.updateLivePointer(newVersion.getFileId(),
                 newVersion.getVersionId(), newRevisionNo, newVersion.getTimestamp());
 
-        logChangeHistory(newVersion.getUserId(), newVersion.getFileId(),
-                "version_updated",
-                "rev " + previousRevisionNo + " -> " + newRevisionNo,
-                newVersion.getVersionId());
+        String changeNote = "rev " + previousRevisionNo + " -> " + newRevisionNo;
+        setMetadataReason(newVersion.getVersionId(), changeNote);
+        audit.record(newVersion.getUserId(), newVersion.getFileId(),
+                "version_updated", newVersion.getVersionId(), Map.of("reason", changeNote));
+
+        // RD-SRS-9.9 / 목표 간극(가): 새 버전 업로드를 이해관계자(구독자)에게 알림.
+        // 버전 기록과 같은 트랜잭션으로 적재 — 커밋되면 알림도 반드시 함께 확정된다.
+        // notifyStakeholders가 행위자(업로더 본인)는 제외하고, 5분 윈도우로 중복도 막는다.
+        // (최초 업로드는 이 시점에 구독자가 없어 알림 대상이 없으므로 수정본 경로에만 둔다.)
+        notifications.notifyStakeholders(newVersion.getFileId(), "새 버전",
+                "새 버전 v" + newRevisionNo + "이(가) 업로드되었습니다.", newVersion.getUserId());
 
         return new ModifyResult(previousVersionId, previousRevisionNo, newRevisionNo, previousStorageKey);
     }
 
     /**
-     * RD-SRS-9.3: 변경 이력 기록. C++ logDocumentChangeHistory의 DB 부분 직역.
-     * activity INSERT + (versionId 있으면) files_versions.metadata JSON_SET.
-     * 같은 트랜잭션에서 실행되어 본 버전 기록과 원자적으로 커밋된다.
+     * RD-SRS-9.3 보조: 버전 metadata에 변경 사유를 JSON_SET. (버전 데이터 관심사라 여기 유지 —
+     * activity 이력 기록은 AuditLogService로 이관됨.)
      */
-    private void logChangeHistory(String userId, String fileId, String action,
-                                  String reason, String versionId) {
-        long now = java.time.Instant.now().getEpochSecond();
-
+    private void setMetadataReason(String versionId, String reason) {
         if (reason != null && !reason.isBlank() && versionId != null && !versionId.isBlank()) {
             filesVersionMapper.setMetadataReason(versionId, reason);
-        }
-
-        String subjectParams = buildSubjectParams(action, fileId, versionId, reason);
-        activityMapper.insertActivity(now, userId, userId,
-                "file_" + action, subjectParams, fileId, "files", fileId);
-    }
-
-    /** subjectparams JSON 조립. C++ 수동 조립 → Jackson(이스케이프 안전). */
-    private String buildSubjectParams(String action, String fileId, String versionId, String reason) {
-        try {
-            Map<String, String> m = new LinkedHashMap<>();
-            m.put("action", action);
-            m.put("fileId", fileId);
-            if (versionId != null && !versionId.isBlank()) m.put("versionId", versionId);
-            if (reason != null && !reason.isBlank()) m.put("reason", reason);
-            return objectMapper.writeValueAsString(m);
-        } catch (Exception e) {
-            return "{}";
         }
     }
 

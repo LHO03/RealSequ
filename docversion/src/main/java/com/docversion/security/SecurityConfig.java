@@ -47,15 +47,22 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/notifications").authenticated()
                 .requestMatchers(HttpMethod.POST, "/api/notifications/*/read").authenticated()
                 .requestMatchers(HttpMethod.POST, "/api/documents/*/subscribe", "/api/documents/*/unsubscribe").authenticated()
-                // 2-E 전환: 보존 정책 변경/적용은 로그인 필수 (ADMIN 전용화는 3단계)
-                .requestMatchers(HttpMethod.POST, "/api/retention/**").authenticated()
+                // 인증 3단계(3-C): 보존 정책은 관리자 전용 (조회 포함 — 정책 관리는 운영 영역).
+                // hasRole("ADMIN") = user_roles에 ADMIN이 있는 계정만. 그 외 로그인 사용자는 403.
+                .requestMatchers("/api/retention/**").hasRole("ADMIN")
+                // 4-C: 승인 위임 — "나의 위임"이므로 조회 포함 로그인 필수
+                .requestMatchers("/api/approval/delegation/**").authenticated()
                 // 그 외(읽기, 아직 미전환 창구, 정적 자원, 로그인)는 열어 둠
                 .anyRequest().permitAll()
             )
             .csrf(csrf -> csrf.disable())
             // 미인증으로 보호된 창구 호출 시: 로그인 페이지 리다이렉트가 아니라 401 JSON
-            .exceptionHandling(ex -> ex.authenticationEntryPoint((req, res, e) ->
-                    writeJson(res, 401, Map.of("ok", false, "error", "로그인이 필요합니다."))))
+            .exceptionHandling(ex -> ex
+                .authenticationEntryPoint((req, res, e) ->
+                    writeJson(res, 401, Map.of("ok", false, "error", "로그인이 필요합니다.")))
+                // 인증 3단계(3-C): 로그인은 됐지만 권한이 없는 경우 — 403 JSON
+                .accessDeniedHandler((req, res, e) ->
+                    writeJson(res, 403, Map.of("ok", false, "error", "관리자(ADMIN)만 사용할 수 있는 기능입니다."))))
             // 세션 기반 폼 로그인. 로그인 처리 창구를 /api/auth/login으로.
             .formLogin(form -> form
                 .loginProcessingUrl("/api/auth/login")

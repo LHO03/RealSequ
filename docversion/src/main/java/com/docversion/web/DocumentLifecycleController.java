@@ -43,6 +43,8 @@ public class DocumentLifecycleController {
                                    @RequestParam(required = false) String reason) {
         try {
             return service.changeStatus(fileId, principal.getName(), targetStatus, reason);
+        } catch (com.docversion.service.ForbiddenOperationException e) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, e.getMessage());
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         } catch (IllegalStateException e) {

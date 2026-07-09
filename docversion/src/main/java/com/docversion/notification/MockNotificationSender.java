@@ -11,7 +11,8 @@ import org.springframework.stereotype.Component;
  * 인앱 알림은 이미 notifications 테이블에 저장되어 화면에서 보이므로, 이 부품은
  * "외부 채널 발송"의 자리만 차지한다. 추후 실제 채널 연동 시 이 클래스를 대체한다.
  */
-@Component
+// @Component 제거: RoutingNotificationSender(@Primary)로 대체됨 — 이메일 실발송 도입.
+// 클래스는 "모의 발송" 예시 기록용으로 남겨 둔다 (필요 시 테스트에서 수동 생성).
 public class MockNotificationSender implements NotificationSender {
 
     private static final Logger log = LoggerFactory.getLogger(MockNotificationSender.class);

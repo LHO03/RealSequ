@@ -23,7 +23,11 @@ public interface AccountMapper {
     int insertUser(@Param("userId") String userId,
                    @Param("passwordHash") String passwordHash,
                    @Param("displayName") String displayName,
+                   @Param("email") String email,
                    @Param("createdAt") long createdAt);
+
+    /** 알림 이메일 발송용 수신 주소. 없거나 비었으면 null → 인앱만. (RD-SRS-9.9) */
+    String findEmail(@Param("userId") String userId);
 
     int insertRole(@Param("userId") String userId,
                    @Param("role") String role,

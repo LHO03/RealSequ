@@ -39,6 +39,11 @@ public interface DocumentMapper {
                                     @Param("currentPath") String currentPath);
 
     /**
+     * 문서 소유자 조회 (인증 3단계: 소유권 검사용). soft delete 제외. 없으면 null.
+     */
+    String findOwner(@Param("fileId") String fileId);
+
+    /**
      * 라이브 포인터 갱신 (onDocumentModified): current_version_id/revision_no/updated_at.
      */
     int updateLivePointer(@Param("fileId") String fileId,

@@ -38,7 +38,8 @@ public class DefaultAccountsInitializer {
 
     private void create(AccountMapper accounts, PasswordEncoder encoder, long now,
                         String id, String rawPw, String name, String role) {
-        accounts.insertUser(id, encoder.encode(rawPw), name, now);
+        // 데모 이메일: {id}@docversion.local — MailHog 시연에서 실제 수신 확인용 (RD-SRS-9.9)
+        accounts.insertUser(id, encoder.encode(rawPw), name, id + "@docversion.local", now);
         accounts.insertRole(id, role, "system", now);
     }
 }

@@ -2,6 +2,11 @@ spring:
   application:
     name: docversion-core
 
+  # 알림 이메일 발송 (RD-SRS-9.9). 개발/시연은 MailHog(가짜 SMTP) — compose가 host를 mailhog로 덮어씀.
+  mail:
+    host: ${SPRING_MAIL_HOST:localhost}
+    port: ${SPRING_MAIL_PORT:1025}
+
   datasource:
     # 로컬 개발 시: docker로 MariaDB 10.11 띄운 뒤 접속
     # (Docker 환경: MariaDB + Redis + Nextcloud + Adminer 구성 기준)
@@ -35,3 +40,8 @@ logging:
 server:
   error:
     include-message: always
+
+docversion:
+  notify:
+    # false면 EMAIL 아웃박스 적재 자체를 생략(메일 서버 없는 환경) — 인앱(WEB)만 동작
+    email-enabled: ${DOCVERSION_EMAIL_ENABLED:true}

@@ -42,4 +42,11 @@
         LIMIT 1
     </select>
 
+    <!-- 인증 3단계: 소유권 검사용 소유자 조회. soft delete 제외. -->
+    <select id="findOwner" resultType="string">
+        SELECT owner_user_id FROM documents
+        WHERE file_id = #{fileId}
+          AND deleted_at IS NULL
+    </select>
+
 </mapper>

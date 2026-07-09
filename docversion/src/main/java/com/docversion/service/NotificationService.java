@@ -1,6 +1,8 @@
 package com.docversion.service;
 
+import com.docversion.mapper.AccountMapper;
 import com.docversion.mapper.NotificationMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -15,17 +17,22 @@ import java.util.Map;
  * 적재한다. 따라서 "변경은 기록됐는데 보낼 항목은 누락" 같은 어긋남이 생기지 않는다.
  * 실제 외부 발송은 아웃박스 워커가 별도로 처리하며, 실패 시 재시도한다.
  *
- * <p>모든 식별은 사용자 ID 기준이다(채널 정보 비저장).
+ * <p>채널: WEB(인앱)은 항상, EMAIL은 수신자 계정에 이메일이 있고 emailEnabled일 때 함께 적재.
  */
 @Service
 public class NotificationService {
 
     private final NotificationMapper mapper;
     private final UuidGenerator uuid;
+    private final AccountMapper accounts;
+    private final boolean emailEnabled;
 
-    public NotificationService(NotificationMapper mapper, UuidGenerator uuid) {
+    public NotificationService(NotificationMapper mapper, UuidGenerator uuid, AccountMapper accounts,
+                               @Value("${docversion.notify.email-enabled:true}") boolean emailEnabled) {
         this.mapper = mapper;
         this.uuid = uuid;
+        this.accounts = accounts;
+        this.emailEnabled = emailEnabled;
     }
 
     /**
@@ -34,19 +41,44 @@ public class NotificationService {
      */
     public void notifyStakeholders(String fileId, String subject, String message, String actorId) {
         long now = Instant.now().getEpochSecond();
-        long bucket = now / 300; // 5분 윈도우 — 동일 이벤트 중복 알림 방지
         List<String> subscribers = mapper.listSubscribers(fileId);
         for (String u : subscribers) {
             if (u == null || u.equals(actorId)) {
                 continue;
             }
-            String notifId = uuid.newId();
-            String dedupKey = subject + ":" + fileId + ":" + u + ":" + bucket;
-            int inserted = mapper.insertNotificationIgnore(
-                    notifId, u, now, "document", fileId, subject, message, dedupKey);
-            if (inserted == 1) {
-                // 같은 트랜잭션에서 아웃박스에도 적재 (발송 신뢰성)
-                mapper.insertOutbox(notifId, u, "WEB", message, now, now);
+            enqueueFor(u, fileId, subject, message, now);
+        }
+    }
+
+    /**
+     * 특정 사용자 1명에게 알림 (4-B 순차 결재의 "당신 차례" 등 대상 지정 알림).
+     * 브로드캐스트(notifyStakeholders)와 동일한 중복 방지·동일 트랜잭션·이메일 적재를 공유한다.
+     */
+    public void notifyUser(String userId, String fileId, String subject, String message) {
+        if (userId == null || userId.isBlank()) {
+            return;
+        }
+        enqueueFor(userId.trim(), fileId, subject, message, Instant.now().getEpochSecond());
+    }
+
+    /** 알림 1건 적재 공통부: 인앱 + 아웃박스(WEB, 이메일 있으면 EMAIL). 호출자 트랜잭션에 합류. */
+    private void enqueueFor(String u, String fileId, String subject, String message, long now) {
+        long bucket = now / 300; // 5분 윈도우 — 동일 이벤트 중복 알림 방지
+        String notifId = uuid.newId();
+        String dedupKey = subject + ":" + fileId + ":" + u + ":" + bucket;
+        int inserted = mapper.insertNotificationIgnore(
+                notifId, u, now, "document", fileId, subject, message, dedupKey);
+        if (inserted == 1) {
+            // 같은 트랜잭션에서 아웃박스에도 적재 (발송 신뢰성)
+            mapper.insertOutbox(notifId, u, "WEB", message, now, now);
+            // RD-SRS-9.9 외부 채널: 수신자에게 이메일이 있으면 EMAIL 발송도 적재.
+            // 같은 트랜잭션이므로 "업무는 됐는데 이메일 발송건이 안 만들어짐"은 없다.
+            // (emailEnabled=false면 인앱만 — 메일 서버 없는 환경 배려)
+            if (emailEnabled) {
+                String email = accounts.findEmail(u);
+                if (email != null && !email.isBlank()) {
+                    mapper.insertOutbox(notifId, u, "EMAIL", "[" + subject + "] " + message, now, now);
+                }
             }
         }
     }

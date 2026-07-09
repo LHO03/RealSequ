@@ -92,6 +92,28 @@ public class DocumentVersionService {
         return sb.toString();
     }
 
+    /**
+     * 인증 3단계(3-A): 클라이언트가 보낸 임의 경로를 로그인 사용자 기준 정규 경로로 재작성.
+     * <p>규칙: 마지막 세그먼트 = 파일명, 선두의 "{누군가}/files" 껍데기는 제거(이미 정규
+     * 경로였던 경우 멱등), 나머지가 폴더. 최종 결과는 항상 /{userId}/files/... 형태이므로
+     * 남의 사용자 공간을 가리키는 경로를 만들 수 없다.
+     */
+    String canonicalizeClientPath(String userId, String rawPath) {
+        String p = rawPath == null ? "" : rawPath.replace('\\', '/');
+        List<String> seg = new ArrayList<>();
+        for (String s : p.split("/")) {
+            String t = s.trim();
+            if (!t.isEmpty()) seg.add(t);
+        }
+        String name = seg.isEmpty() ? "untitled" : seg.remove(seg.size() - 1);
+        if (seg.size() >= 2 && "files".equals(seg.get(1))) { // "/{user}/files/..." 껍데기 제거
+            seg.remove(1);
+            seg.remove(0);
+        }
+        String folder = String.join("/", seg);
+        return canonicalPath(userId, folder, name);
+    }
+
     private String baseName(String original) {
         if (original == null) return "untitled";
         String s = original.replace('\\', '/');
@@ -135,6 +157,11 @@ public class DocumentVersionService {
     // RD-SRS-9.1: 최초 버전 생성
     // ==========================================================
     public VersionInfo createInitialVersion(String userId, String filePath, FileContent content) {
+        // 인증 3단계(3-A): 경로 위장 차단 — 클라이언트가 보낸 경로를 그대로 신뢰하지 않고,
+        // 로그인 사용자 기준 정규 경로(/{userId}/files/...)로 서버가 재작성한다.
+        // (bob이 path=/alice/files/x.txt 로 보내도 결과는 /bob/files/x.txt)
+        String canonical = canonicalizeClientPath(userId, filePath);
+
         String fileId = uuid.newId();
         String versionId = uuid.newId();
         long revisionNo = 1;
@@ -157,7 +184,7 @@ public class DocumentVersionService {
 
         // 2) DB 트랜잭션. 실패 시 저장된 파일 보상 삭제(C++ 보상 삭제 로직 대응).
         try {
-            writeService.persistInitialVersion(version, filePath);
+            writeService.persistInitialVersion(version, canonical);
         } catch (RuntimeException e) {
             safeDelete(storageKey);
             throw new VersionOperationException("createInitialVersion DB 저장 실패", e);
@@ -175,6 +202,17 @@ public class DocumentVersionService {
     // RD-SRS-9.2: 문서 수정 → 새 버전 자동 생성
     // ==========================================================
     public VersionInfo onDocumentModified(String userId, String fileId, FileContent newContent) {
+        // 인증 3단계(3-A): 소유권 검사 — 개인 소유 모델에서 문서 쓰기는 소유자만 가능.
+        // 2단계에서 "누구인지"를 확보했다면, 여기서는 "이 문서에 쓸 자격이 있는지"를 본다.
+        // 문서 없음 → IllegalArgument(404), 남의 문서 → Forbidden(403).
+        String owner = documentMapper.findOwner(fileId);
+        if (owner == null) {
+            throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);
+        }
+        if (!owner.equals(userId)) {
+            throw new ForbiddenOperationException("문서 소유자만 새 버전을 올릴 수 있습니다.");
+        }
+
         String versionId = uuid.newId();
         long timestamp = Instant.now().getEpochSecond();
         String storageKey = "objects/" + fileId + "/versions/" + versionId;

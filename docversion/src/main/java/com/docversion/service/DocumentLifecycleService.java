@@ -1,6 +1,7 @@
 package com.docversion.service;
 
 import com.docversion.domain.DocumentStatus;
+import com.docversion.mapper.DocumentMapper;
 import com.docversion.mapper.LifecycleMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,10 +22,13 @@ public class DocumentLifecycleService {
 
     private final LifecycleMapper mapper;
     private final NotificationService notifications;
+    private final DocumentMapper documents; // 인증 3단계(3-B): 소유권 검사용
 
-    public DocumentLifecycleService(LifecycleMapper mapper, NotificationService notifications) {
+    public DocumentLifecycleService(LifecycleMapper mapper, NotificationService notifications,
+                                    DocumentMapper documents) {
         this.mapper = mapper;
         this.notifications = notifications;
+        this.documents = documents;
     }
 
     /** 다음 전이 가능한 상태 1개의 표현 (코드명 + 한글 라벨). */
@@ -44,9 +48,30 @@ public class DocumentLifecycleService {
         return view(DocumentStatus.of(s));
     }
 
-    /** 상태 변경 (전이 규칙 검증 + 이력 기록). */
+    /**
+     * 상태 변경 — 수동 경로 (화면/API에서 직접 호출).
+     * 인증 3단계(3-B): 문서 소유자만 자기 문서의 상태를 바꿀 수 있다.
+     * (승인 절차가 일으키는 상태 변경은 changeStatusAsWorkflow 사용 — 그 경로는
+     *  승인자/요청자 자격을 승인 로직이 이미 검증했으므로 소유권 검사를 걸지 않는다.)
+     */
     @Transactional
     public StatusView changeStatus(String fileId, String userId, String targetStatus, String reason) {
+        String owner = documents.findOwner(fileId);
+        if (owner == null) {
+            throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);
+        }
+        if (!owner.equals(userId)) {
+            throw new ForbiddenOperationException("문서 소유자만 상태를 변경할 수 있습니다.");
+        }
+        return changeStatusAsWorkflow(fileId, userId, targetStatus, reason);
+    }
+
+    /**
+     * 상태 변경 — 워크플로 경로 (승인/반려/취소가 내부적으로 호출).
+     * 전이 규칙 검증 + 이력 기록 + 알림 적재. 소유권 검사 없음(호출자가 자격 검증 책임).
+     */
+    @Transactional
+    public StatusView changeStatusAsWorkflow(String fileId, String userId, String targetStatus, String reason) {
         String s = mapper.findStatus(fileId);
         if (s == null) {
             throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);

@@ -40,6 +40,9 @@ services:
       SPRING_DATASOURCE_URL: "jdbc:mariadb://mariadb:3306/nextcloud?useUnicode=true&characterEncoding=utf8mb4"
       SPRING_DATASOURCE_USERNAME: nextcloud
       SPRING_DATASOURCE_PASSWORD: nextcloud
+      # 알림 이메일 발송(SMTP) — 시연용 가짜 메일함 MailHog로 보냄
+      SPRING_MAIL_HOST: mailhog
+      SPRING_MAIL_PORT: 1025
       # 버전 스냅샷 저장 경로 (볼륨에 영속 → 재시작해도 이전 버전 콘텐츠 유지)
       DOCVERSION_STORAGE_BASE_PATH: /data/storage
     ports:
@@ -53,6 +56,12 @@ services:
       - mariadb
     ports:
       - "8081:8080"            # http://localhost:8081 (Server=mariadb, 계정 nextcloud/nextcloud)
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "8025:8025"            # 웹 메일함 http://localhost:8025 — 발송된 알림 메일을 눈으로 확인
+      # SMTP(1025)는 컨테이너 네트워크 안에서만 사용 (app → mailhog:1025)
 
 volumes:
   mariadb-data:

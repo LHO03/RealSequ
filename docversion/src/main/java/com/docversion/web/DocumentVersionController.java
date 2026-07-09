@@ -3,9 +3,12 @@ package com.docversion.web;
 import com.docversion.domain.FileContent;
 import com.docversion.domain.VersionInfo;
 import com.docversion.service.DocumentVersionService;
+import com.docversion.service.ForbiddenOperationException;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.security.Principal;
@@ -49,13 +52,20 @@ public class DocumentVersionController {
         return service.createInitialVersion(principal.getName(), path, content);
     }
 
-    /** RD-SRS-9.2: 문서 수정 → 새 버전. 작성자 = 로그인 사용자. */
+    /** RD-SRS-9.2: 문서 수정 → 새 버전. 작성자 = 로그인 사용자.
+     *  인증 3단계(3-A): 소유자가 아니면 403, 문서가 없으면 404. */
     @PostMapping("/{fileId}/versions")
     public VersionInfo onDocumentModified(Principal principal,
                                           @PathVariable String fileId,
                                           @RequestParam("file") MultipartFile file) throws IOException {
         FileContent content = new FileContent(file.getBytes(), file.getContentType());
-        return service.onDocumentModified(principal.getName(), fileId, content);
+        try {
+            return service.onDocumentModified(principal.getName(), fileId, content);
+        } catch (ForbiddenOperationException e) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
     }
 
     /** RD-SRS-9.5: 특정 시점 버전 목록. targetTimestamp=0이면 전체 최신순. (읽기 — 비로그인 허용) */

@@ -250,13 +250,20 @@
         <button class="ghost" id="r-btn">새로고침</button>
       </div>
 
-      <h3 style="font-family:Fraunces,serif;font-weight:500;font-size:15px;margin:0 0 8px">버전 이력</h3>
+      <h3 style="font-family:Fraunces,serif;font-weight:500;font-size:15px;margin:0 0 8px">버전 이력 <span class="rd" style="font-size:10px">9.5</span></h3>
+      <div class="diffbar" style="margin-bottom:8px">
+        <input type="datetime-local" id="at-time" style="flex:none;width:auto">
+        <button class="ghost" id="at-btn" style="flex:none">시점 조회</button>
+        <button class="ghost" id="at-reset" style="flex:none">전체 보기</button>
+        <span id="at-note" style="font-size:12px;color:var(--ink-soft)"></span>
+      </div>
       <table>
         <thead><tr><th>rev</th><th>version_id</th><th>작성자</th><th>크기</th><th>시각</th></tr></thead>
         <tbody id="vbody"></tbody>
       </table>
 
-      <h3 style="font-family:Fraunces,serif;font-weight:500;font-size:15px;margin:26px 0 10px">버전 비교 (diff)</h3>
+      <h3 style="font-family:Fraunces,serif;font-weight:500;font-size:15px;margin:26px 0 10px">버전 비교 (diff) <span class="rd" style="font-size:10px">9.4</span></h3>
+      <p class="hint" style="margin-top:0">텍스트 파일은 그대로, <b>PDF·Word·Excel·PowerPoint·ODF·RTF</b>는 본문을 추출해 줄 단위로 비교합니다. 그 외 형식(HWP는 지원 예정)과 스캔 이미지형 문서는 내용 지문(해시) 비교로 대신합니다.</p>
       <div class="diffbar">
         <select id="d-from"></select>
         <span style="color:var(--ink-soft)">→</span>
@@ -285,9 +292,13 @@
       </div>
       <div id="ap-panel" style="margin-bottom:12px"></div>
       <table style="margin-top:4px">
-        <thead><tr><th>요청</th><th>상태</th><th>요청자</th><th>승인자</th><th>시각</th></tr></thead>
+        <thead><tr><th>요청</th><th>상태</th><th>요청자</th><th>방식 · 승인 현황</th><th>시각</th></tr></thead>
         <tbody id="apbody"><tr><td colspan="5" class="empty">승인 요청 이력이 없습니다.</td></tr></tbody>
       </table>
+
+      <h3 style="font-family:Fraunces,serif;font-weight:500;font-size:15px;margin:26px 0 10px">승인 위임 <span style="font-size:11px;color:var(--gold)">9.7 · 부재 시 대리</span></h3>
+      <p class="hint" style="margin-top:0">부재(휴가 등) 동안 <b>내 승인 권한</b>을 대리인에게 기간제로 넘깁니다. 위임해도 본인이 직접 판정할 수 있으며, 대리 판정은 기록에 "(대리: ○○)"로 남습니다. 요청자는 대리인 자격으로도 자기 요청을 판정할 수 없습니다.</p>
+      <div id="dg-panel" class="row" style="align-items:center"><span class="hint" style="margin:0">로그인하면 위임을 관리할 수 있습니다.</span></div>
 
       <h3 style="font-family:Fraunces,serif;font-weight:500;font-size:15px;margin:26px 0 10px">구독자 (이해관계자) <span style="font-size:11px;color:var(--gold)">9.9</span></h3>
       <div class="row">
@@ -308,7 +319,7 @@
       <div id="nf-list"><p class="empty">로그인 후 조회하세요.</p></div>
 
       <h3 style="font-family:Fraunces,serif;font-weight:500;font-size:15px;margin:26px 0 8px">발송 아웃박스</h3>
-      <p class="hint" style="margin-top:0">업무 변경과 <b>같은 트랜잭션</b>으로 적재되는 발송 큐입니다. 워커가 5초마다 PENDING을 처리해 SENT로 바꿉니다. (실제 발송은 모의 처리)</p>
+      <p class="hint" style="margin-top:0">업무 변경과 <b>같은 트랜잭션</b>으로 적재되는 발송 큐입니다. 워커가 5초마다 PENDING을 처리해 SENT로 바꿉니다. WEB은 인앱 표시로 완결, <b>EMAIL은 실제 SMTP 발송</b> — 받은 메일은 <a href="http://localhost:8025" target="_blank">MailHog 메일함(localhost:8025)</a>에서 확인하세요.</p>
       <table style="margin-top:6px">
         <thead><tr><th>#</th><th>수신자</th><th>채널</th><th>상태</th><th>재시도</th><th>내용</th></tr></thead>
         <tbody id="ob-body"><tr><td colspan="6" class="empty">—</td></tr></tbody>
@@ -443,6 +454,8 @@ document.getElementById("m-btn").onclick=async()=>{
   try{
     const r=await fetch(`${API}/${active}/versions`,{method:"POST",body:fd});
     if(r.status===401){ toast("로그인이 필요합니다",true); return; }
+    if(r.status===403){ toast("문서 소유자만 새 버전을 올릴 수 있습니다 (인증 3단계)",true); return; }
+    if(r.status===404){ toast("문서를 찾을 수 없습니다",true); return; }
     if(!r.ok) throw new Error("HTTP "+r.status);
     const v=await r.json();
     if(v.empty){ toast("문서를 찾을 수 없습니다",true); return; }
@@ -455,18 +468,23 @@ document.getElementById("r-btn").onclick=loadVersions;
 
 /* ---------- 버전 목록 ---------- */
 let versions=[];
-async function loadVersions(){
-  const d=docs.find(x=>x.fileId===active);
-  const r=await fetch(`${API}/${active}/versions`);
-  versions=await r.json();
+function renderVersions(list){
   const tb=document.getElementById("vbody"); tb.innerHTML="";
-  versions.forEach(v=>{
+  if(!list.length){ tb.innerHTML='<tr><td colspan="5" class="empty">해당 시점 이전의 버전이 없습니다.</td></tr>'; return; }
+  list.forEach(v=>{
     const tr=document.createElement("tr");
     tr.innerHTML=`<td class="revbadge">v${v.revisionNo}</td><td class="vid">${short(v.versionId)}</td>
       <td>${v.userId||"-"}</td><td class="mono" style="font-size:11px">${fmtSize(v.size)}</td>
       <td class="mono" style="font-size:11px;color:var(--ink-soft)">${fmtTime(v.timestamp)}</td>`;
     tb.appendChild(tr);
   });
+}
+async function loadVersions(){
+  const d=docs.find(x=>x.fileId===active);
+  const r=await fetch(`${API}/${active}/versions`);
+  versions=await r.json();
+  document.getElementById("at-note").textContent="";
+  renderVersions(versions);
   // diff 선택지 채우기 (최신순 → 옵션)
   const fromSel=document.getElementById("d-from"), toSel=document.getElementById("d-to");
   const opts=versions.map(v=>`<option value="${v.versionId}">v${v.revisionNo} · ${short(v.versionId)}</option>`).join("");
@@ -474,6 +492,24 @@ async function loadVersions(){
   if(versions.length>=2){ fromSel.value=versions[1].versionId; toSel.value=versions[0].versionId; loadDiff(); }
   else{ document.getElementById("diffview").innerHTML='<div class="ln meta" style="padding:14px">버전이 2개 이상일 때 비교할 수 있습니다.</div>'; document.getElementById("d-chips").innerHTML=""; }
 }
+/* RD-SRS-9.5: 특정 시점 버전 조회 — 그 시각 이하(당시 존재하던) 버전만 표시 */
+document.getElementById("at-btn").onclick=async()=>{
+  if(!active){ toast("문서를 먼저 선택하세요",true); return; }
+  const val=document.getElementById("at-time").value;
+  if(!val){ toast("조회할 시점을 선택하세요",true); return; }
+  const ts=Math.floor(new Date(val).getTime()/1000);
+  try{
+    const r=await fetch(`${API}/${active}/versions?targetTimestamp=${ts}`);
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const list=await r.json();
+    renderVersions(list);
+    const note=document.getElementById("at-note");
+    if(!list.length){ note.textContent=`${val.replace("T"," ")} 시점 — 버전 없음`; }
+    else if(list[0].timestamp>ts){ note.textContent=`${val.replace("T"," ")} 시점 이전 버전 없음 → 이후 최초 버전 v${list[0].revisionNo} 표시`; }
+    else{ note.textContent=`${val.replace("T"," ")} 시점 기준 ${list.length}개 · 당시 최신 v${list[0].revisionNo}`; }
+  }catch(err){ toast("시점 조회 실패: "+err.message,true); }
+};
+document.getElementById("at-reset").onclick=()=>{ document.getElementById("at-time").value=""; if(active) loadVersions(); };
 
 /* ---------- diff ---------- */
 document.getElementById("d-btn").onclick=loadDiff;
@@ -564,15 +600,16 @@ async function loadStatusHistory(){
   }catch(err){ tb.innerHTML='<tr><td colspan="4" class="empty">이력을 불러오지 못했습니다.</td></tr>'; }
 }
 
-/* ---------- 승인 워크플로 (9.7) ---------- */
+/* ---------- 승인 워크플로 (9.7 · V8 다중 승인자) ---------- */
 async function apPost(path){
   if(!currentUser){ toast("로그인이 필요합니다",true); return null; }
   const fd=new FormData();
   const cmt=document.getElementById("ap-comment");
   if(path==="request"){
-    const approver=(document.getElementById("ap-approver").value||"").trim();
-    if(!approver){ toast("승인자를 지정하세요",true); return null; }
-    fd.append("approverId",approver);
+    const approvers=(document.getElementById("ap-approvers").value||"").trim();
+    if(!approvers){ toast("승인자를 1명 이상 지정하세요 (쉼표로 구분)",true); return null; }
+    fd.append("approvers",approvers);
+    fd.append("mode",document.getElementById("ap-mode").value);
   }
   if(cmt && cmt.value) fd.append("comment",cmt.value);
   const r=await fetch(`${API}/${active}/approval/${path}`,{method:"POST",body:fd});
@@ -581,6 +618,15 @@ async function apPost(path){
   if(!r.ok){ toast(v.message || ("처리 실패: HTTP "+r.status), true); return null; }
   return v;
 }
+function decisionChip(a, seqMode, currentTurn){
+  const map={PENDING:["대기","#8a8a8a","#f1f1f1"],APPROVED:["승인","#2e6f5e","#e3f2ec"],REJECTED:["반려","#a33c3c","#f9e7e7"]};
+  const [label,fg,bg]=map[a.decision]||map.PENDING;
+  const prefix=seqMode?`${a.seq}. `:"";
+  const turn=(seqMode && currentTurn===a.approverId)?"box-shadow:0 0 0 2px "+fg+"55;font-weight:600;":"";
+  const turnMark=(seqMode && currentTurn===a.approverId)?" ← 차례":"";
+  const byProxy=(a.actedBy && a.actedBy!==a.approverId)?` (대리: ${a.actedBy})`:"";
+  return `<span class="chip" style="color:${fg};background:${bg};border-color:${fg}33;${turn}">${prefix}${a.approverId} · ${label}${byProxy}${turnMark}</span>`;
+}
 async function loadApproval(){
   const panel=document.getElementById("ap-panel");
   let state;
@@ -588,31 +634,64 @@ async function loadApproval(){
   catch(e){ panel.innerHTML=""; return; }
   const open=state.open;
   if(open){
+    const aps=open.approvers||[];
+    const ok=aps.filter(a=>a.decision==="APPROVED").length;
+    const no=aps.filter(a=>a.decision==="REJECTED").length;
+    const seqMode=open.mode==="SEQUENTIAL";
+    const cur=seqMode?(aps.find(a=>a.decision==="PENDING")||{}).approverId:null;
+    const modeLabel=open.mode==="MAJORITY"?"과반":(seqMode?"순차":"전원");
+    const pend=aps.filter(a=>a.decision==="PENDING").length;
+    // 내가 번복할 수 있는 판정: 승인자 본인이거나 내가 대리로 판정한 행
+    const myDecided=currentUser?aps.find(a=>a.decision!=="PENDING"&&(a.approverId===currentUser||a.actedBy===currentUser)):null;
     panel.innerHTML=`
       <div style="border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--paper)">
-        <div style="margin-bottom:8px"><span class="chip method">승인 대기</span>
-          <span style="font-size:13px;margin-left:6px">요청자 <b>${open.requesterId}</b> → 승인자 <b>${open.approverId}</b></span></div>
+        <div style="margin-bottom:8px"><span class="chip method">승인 대기 · ${modeLabel}</span>
+          <span style="font-size:13px;margin-left:6px">요청자 <b>${open.requesterId}</b> · 진행 <b>승인 ${ok} / 반려 ${no} / 전체 ${aps.length}</b></span></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${aps.map(a=>decisionChip(a,seqMode,cur)).join("")}</div>
         <div class="row">
           <input type="text" id="ap-comment" placeholder="사유 (선택)" style="flex:1;min-width:160px">
           <button id="ap-approve">승인</button>
           <button class="ghost" id="ap-reject">반려</button>
+          ${myDecided?'<button class="ghost" id="ap-retract">내 판정 번복</button>':''}
           <button class="ghost" id="ap-cancel">요청 취소</button>
         </div>
       </div>`;
-    document.getElementById("ap-approve").onclick=async()=>{ const v=await apPost("approve"); if(v){ toast("승인 완료"); await loadStatus(); await loadApproval(); } };
-    document.getElementById("ap-reject").onclick=async()=>{ const v=await apPost("reject"); if(v){ toast("반려 처리"); await loadStatus(); await loadApproval(); } };
-    document.getElementById("ap-cancel").onclick=async()=>{ const v=await apPost("cancel"); if(v){ toast("요청 취소됨"); await loadStatus(); await loadApproval(); } };
+    // 확인 대화상자 (4-D): 확정을 유발하는 판정은 그 사실을 미리 알려준다
+    const needed=Math.floor(aps.length/2)+1;
+    const approveFinalizes = open.mode==="MAJORITY" ? (ok+1>=needed) : (pend===1);
+    const rejectFinalizes  = open.mode==="MAJORITY" ? (aps.length-(no+1)<needed) : true;
+    document.getElementById("ap-approve").onclick=async()=>{
+      const msg=approveFinalizes?"승인하시겠습니까?\n\n이 승인으로 전체가 [최종 승인]으로 확정됩니다.":"승인하시겠습니까?";
+      if(!confirm(msg)) return;
+      const v=await apPost("approve"); if(v){ toast("승인 처리됨"); await loadStatus(); await loadApproval(); } };
+    document.getElementById("ap-reject").onclick=async()=>{
+      const msg=rejectFinalizes?"반려하시겠습니까?\n\n이 반려로 전체가 [즉시 반려]로 확정됩니다. 확정 후에는 번복할 수 없습니다.":"반려하시겠습니까?";
+      if(!confirm(msg)) return;
+      const v=await apPost("reject"); if(v){ toast("반려 처리됨"); await loadStatus(); await loadApproval(); } };
+    if(myDecided){
+      document.getElementById("ap-retract").onclick=async()=>{
+        if(!confirm(`내 판정(${myDecided.approverId}${myDecided.actedBy&&myDecided.actedBy!==myDecided.approverId?" 대리":""} · ${myDecided.decision==="APPROVED"?"승인":"반려"})을 번복하고 대기 상태로 되돌리시겠습니까?`)) return;
+        const v=await apPost("retract"); if(v){ toast("판정이 번복되었습니다"); await loadStatus(); await loadApproval(); } };
+    }
+    document.getElementById("ap-cancel").onclick=async()=>{
+      if(!confirm("승인 요청을 취소하시겠습니까?\n\n문서는 초안으로 돌아가며, 이미 이뤄진 판정 기록은 보존됩니다.")) return;
+      const v=await apPost("cancel"); if(v){ toast("요청 취소됨"); await loadStatus(); await loadApproval(); } };
   }else{
     panel.innerHTML=`
       <div class="row">
-        <input type="text" id="ap-approver" placeholder="승인자 ID (요청자와 달라야 함)" style="width:230px">
-        <input type="text" id="ap-comment" placeholder="요청 사유 (선택)" style="flex:1;min-width:140px">
+        <input type="text" id="ap-approvers" placeholder="승인자 ID들 (쉼표로 구분: bob,admin)" style="width:280px">
+        <select id="ap-mode" style="flex:none">
+          <option value="ALL">전원 동의</option>
+          <option value="MAJORITY">과반 동의</option>
+          <option value="SEQUENTIAL">순차 결재</option>
+        </select>
+        <input type="text" id="ap-comment" placeholder="요청 사유 (선택)" style="flex:1;min-width:120px">
         <button id="ap-request">승인 요청</button>
       </div>
-      <p class="hint" style="margin-top:8px">문서가 <b>검토중</b>일 때만 요청할 수 있습니다. 먼저 위 \u201C문서 상태\u201D에서 검토중으로 제출하세요.</p>`;
+      <p class="hint" style="margin-top:8px">문서가 <b>검토중</b>일 때만 요청할 수 있습니다. 여러 승인자를 쉼표로 지정하고 방식(전원/과반)을 고르세요. 요청자 본인은 승인자가 될 수 없습니다.</p>`;
     document.getElementById("ap-request").onclick=async()=>{ const v=await apPost("request"); if(v){ toast("승인 요청 생성됨"); await loadStatus(); await loadApproval(); } };
   }
-  // 이력 표
+  // 이력 표 (방식·승인 현황 포함)
   const tb=document.getElementById("apbody");
   const rows=state.history||[];
   if(!rows.length){ tb.innerHTML='<tr><td colspan="5" class="empty">승인 요청 이력이 없습니다.</td></tr>'; return; }
@@ -620,12 +699,59 @@ async function loadApproval(){
   rows.forEach(h=>{
     const tr=document.createElement("tr");
     const when=h.decidedAt?h.decidedAt:h.createdAt;
+    const modeL=h.mode==="MAJORITY"?"과반":(h.mode==="SEQUENTIAL"?"순차":"전원");
     tr.innerHTML=`<td class="vid">${short(h.id)}</td>
       <td><span class="mono" style="font-size:11px">${reqLabel(h.status)}</span></td>
-      <td>${h.requesterId||"-"}</td><td>${h.approverId||"-"}</td>
+      <td>${h.requesterId||"-"}</td>
+      <td class="mono" style="font-size:11px">${modeL} · ${h.approvedCount||0}/${h.totalApprovers||0}<br><span style="color:var(--ink-soft)">${h.approverNames||"-"}</span></td>
       <td class="mono" style="font-size:11px;color:var(--ink-soft)">${fmtTime(when)}</td>`;
     tb.appendChild(tr);
   });
+}
+
+/* ---------- 승인 위임 (9.7 · 4-C) ---------- */
+async function loadDelegation(){
+  const panel=document.getElementById("dg-panel");
+  if(!panel) return;
+  if(!currentUser){ panel.innerHTML='<span class="hint" style="margin:0">로그인하면 위임을 관리할 수 있습니다.</span>'; return; }
+  let st;
+  try{
+    const r=await fetch("/api/approval/delegation");
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    st=await r.json();
+  }catch(e){ panel.innerHTML='<span class="hint" style="margin:0">위임 정보를 불러오지 못했습니다.</span>'; return; }
+  const mine=st.mine && st.mine.delegateId ? st.mine : null;
+  const received=(st.received||[]);
+  const recTxt=received.length
+    ? `내게 온 위임: ${received.map(d=>`<b>${d.delegatorId}</b>(~${fmtTime(d.endsAt)})`).join(", ")}`
+    : "내게 온 위임 없음";
+  if(mine){
+    panel.innerHTML=`
+      <span style="font-size:13px;flex:1;min-width:200px">내 위임: <b>${mine.delegateId}</b>에게 (~${fmtTime(mine.endsAt)}) · <span class="hint" style="margin:0;display:inline">${recTxt}</span></span>
+      <button class="ghost" id="dg-revoke" style="flex:none">위임 해지</button>`;
+    document.getElementById("dg-revoke").onclick=async()=>{
+      const r=await fetch("/api/approval/delegation/revoke",{method:"POST"});
+      const v=await r.json();
+      if(!r.ok){ toast(v.message||"해지 실패",true); return; }
+      toast("위임이 해지되었습니다"); loadDelegation();
+    };
+  }else{
+    panel.innerHTML=`
+      <input type="text" id="dg-delegate" placeholder="대리인 ID" style="width:150px">
+      <input type="number" id="dg-days" value="7" min="1" max="365" style="width:80px" title="기간(일)">
+      <button id="dg-set" style="flex:none">위임 설정</button>
+      <span style="font-size:12.5px;color:var(--ink-soft)">${recTxt}</span>`;
+    document.getElementById("dg-set").onclick=async()=>{
+      const delegate=(document.getElementById("dg-delegate").value||"").trim();
+      const days=document.getElementById("dg-days").value||"7";
+      if(!delegate){ toast("대리인 ID를 입력하세요",true); return; }
+      const fd=new FormData(); fd.append("delegateId",delegate); fd.append("days",days);
+      const r=await fetch("/api/approval/delegation",{method:"POST",body:fd});
+      const v=await r.json();
+      if(!r.ok){ toast(v.message||"위임 설정 실패",true); return; }
+      toast(`${delegate}에게 ${days}일 위임 설정됨`); loadDelegation();
+    };
+  }
 }
 
 /* ---------- 구독자 (9.9) ---------- */
@@ -728,6 +854,7 @@ document.getElementById("rt-create").onclick=async()=>{
   try{
     const r=await fetch(`/api/retention/policies`,{method:"POST",body:fd});
     if(r.status===401){ toast("로그인이 필요합니다",true); return; }
+    if(r.status===403){ toast("관리자(admin)만 보존 정책을 관리할 수 있습니다 (인증 3단계)",true); return; }
     const v=await r.json();
     if(!r.ok){ toast(v.message||("정책 생성 실패: HTTP "+r.status),true); return; }
     toast("보존 정책 생성됨");
@@ -739,6 +866,7 @@ async function loadPolicies(){
   const tb=document.getElementById("rtbody");
   try{
     const r=await fetch(`/api/retention/policies`);
+    if(r.status===401||r.status===403){ tb.innerHTML='<tr><td colspan="8" class="empty">관리자(admin) 계정으로 로그인하면 보존 정책을 관리할 수 있습니다.</td></tr>'; return; }
     const rows=await r.json();
     if(!rows.length){ tb.innerHTML='<tr><td colspan="8" class="empty">등록된 보존 정책이 없습니다.</td></tr>'; return; }
     tb.innerHTML="";
@@ -759,6 +887,7 @@ async function loadPolicies(){
           if(!currentUser){ toast("로그인이 필요합니다",true); return; }
           const r=await fetch(`/api/retention/policies/${p.id}/apply`,{method:"POST"});
           if(r.status===401){ toast("로그인이 필요합니다",true); return; }
+          if(r.status===403){ toast("관리자(admin)만 보존 정책을 관리할 수 있습니다 (인증 3단계)",true); return; }
           const v=await r.json();
           if(r.ok) toast("정리 완료 · 버전 "+v.deleted+"개 삭제"); else toast(v.message||"적용 실패",true);
           await loadPolicies(); await loadVersions?.(); };
@@ -767,6 +896,8 @@ async function loadPolicies(){
           if(!currentUser){ toast("로그인이 필요합니다",true); return; }
           const r=await fetch(`/api/retention/policies/${p.id}/deactivate`,{method:"POST"});
           if(r.status===401){ toast("로그인이 필요합니다",true); return; }
+          if(r.status===403){ toast("관리자(admin)만 보존 정책을 관리할 수 있습니다 (인증 3단계)",true); return; }
+          if(!r.ok){ toast("비활성화 실패: HTTP "+r.status,true); return; }
           toast("정책 비활성화됨"); await loadPolicies(); };
         cell.appendChild(ap); cell.appendChild(de);
       }
@@ -804,6 +935,7 @@ async function loadAuth(){
     if(nfs) nfs.innerHTML = currentUser
       ? `현재 로그인 사용자 <b>${currentUser}</b>의 알림입니다.`
       : '로그인하면 내 알림을 볼 수 있습니다.';
+    loadDelegation();
   }catch(e){ state.textContent="인증 상태 확인 실패"; }
 }
 document.getElementById("auth-btn").onclick=async()=>{
