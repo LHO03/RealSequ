@@ -14,4 +14,16 @@
              #{subject}, #{subjectparams}, #{file}, #{objectType}, #{objectId})
     </insert>
 
+    <!-- 07/12 - RD-SRS-9.3: 문서별 활동 이력 조회.
+         subject에 'file_' 접두가 붙은 행위 코드, subjectparams(JSON)에 사유·버전이 담긴다.
+         (기존에는 INSERT만 있어 이력을 "기록"은 하되 "조회"할 창구가 없었다.) -->
+    <select id="listByFile" resultType="map">
+        SELECT activity_id AS activityId, `timestamp`, `user`,
+               subject, subjectparams, object_id AS objectId
+        FROM activity
+        WHERE object_id = #{fileId} AND object_type = 'files'
+        ORDER BY `timestamp` DESC, activity_id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
 </mapper>

@@ -60,4 +60,14 @@
         WHERE version_id = #{versionId}
     </update>
 
+
+    <!-- 07/12 - RD-SRS-9.5 열람: 버전 콘텐츠 응답용 메타 단건.
+         file_id를 함께 반환해 "요청 경로의 문서에 속한 버전인지"를 서비스가 대조한다. -->
+    <select id="findVersionForContent" resultType="map">
+        SELECT version_id AS versionId, file_id AS fileId, revision_no AS revisionNo,
+               storage_key AS storageKey, mimetype, size
+        FROM files_versions
+        WHERE version_id = #{versionId}
+    </select>
+
 </mapper>

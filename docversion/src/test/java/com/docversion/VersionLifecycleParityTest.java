@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 버전 생명주기 parity 통합 테스트.
@@ -88,10 +89,13 @@ class VersionLifecycleParityTest {
     }
 
     @Test
-    void modifyMissingDocument_returnsEmpty() {
-        VersionInfo result = service.onDocumentModified(
+    void modifyMissingDocument_throwsNotFound() {
+        // 07/12 - C-3: 인증 3-A(소유권 검사) 도입 이후, 없는 문서 수정은
+        //   "빈 결과"가 아니라 IllegalArgumentException(컨트롤러에서 404)이다.
+        assertThatThrownBy(() -> service.onDocumentModified(
                 "bob", "non-existent-file-id",
-                FileContent.ofText("x", "text/plain"));
-        assertThat(result.isEmpty()).isTrue();
+                FileContent.ofText("x", "text/plain")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("문서를 찾을 수 없습니다");
     }
 }

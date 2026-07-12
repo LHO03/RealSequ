@@ -1,9 +1,11 @@
 package com.docversion.service;
 
 import com.docversion.domain.DocumentStatus;
+import com.docversion.mapper.ApprovalMapper;
 import com.docversion.mapper.DocumentMapper;
 import com.docversion.mapper.LifecycleMapper;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -23,12 +25,14 @@ public class DocumentLifecycleService {
     private final LifecycleMapper mapper;
     private final NotificationService notifications;
     private final DocumentMapper documents; // 인증 3단계(3-B): 소유권 검사용
+    private final ApprovalMapper approvals; // 07/12 - C-2: 열린 승인 요청 존재 검사용 (매퍼 참조라 순환 의존 없음)
 
     public DocumentLifecycleService(LifecycleMapper mapper, NotificationService notifications,
-                                    DocumentMapper documents) {
+                                    DocumentMapper documents, ApprovalMapper approvals) {
         this.mapper = mapper;
         this.notifications = notifications;
         this.documents = documents;
+        this.approvals = approvals;
     }
 
     /** 다음 전이 가능한 상태 1개의 표현 (코드명 + 한글 라벨). */
@@ -49,6 +53,21 @@ public class DocumentLifecycleService {
     }
 
     /**
+     * 07/12 - C-1: 문서 행을 잠그면서 상태 조회.
+     * 상태 검사와 그에 뒤따르는 변경(승인 요청 생성, 판정, 수동 상태 변경)을 문서 단위로
+     * 직렬화하기 위한 진입 잠금이다. 잠금은 트랜잭션이 끝날 때 풀리므로, 반드시 호출자의
+     * 활성 트랜잭션 안에서 불러야 한다(MANDATORY — 트랜잭션 없이 부르면 즉시 오류로 알려줌).
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public StatusView getStatusForUpdate(String fileId) {
+        String s = mapper.findStatusForUpdate(fileId);
+        if (s == null) {
+            throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);
+        }
+        return view(DocumentStatus.of(s));
+    }
+
+    /**
      * 상태 변경 — 수동 경로 (화면/API에서 직접 호출).
      * 인증 3단계(3-B): 문서 소유자만 자기 문서의 상태를 바꿀 수 있다.
      * (승인 절차가 일으키는 상태 변경은 changeStatusAsWorkflow 사용 — 그 경로는
@@ -56,12 +75,25 @@ public class DocumentLifecycleService {
      */
     @Transactional
     public StatusView changeStatus(String fileId, String userId, String targetStatus, String reason) {
+        // 07/12 - C-1: 문서 행을 먼저 잠근다. 이 잠금이 있어야 아래 C-2 가드(열린 요청 검사)와
+        //   승인 요청 생성(request)의 상태 검사가 서로의 커밋 전 상태를 읽는 경합(TOCTOU)을
+        //   일으키지 못한다. 잠금 순서 규약: documents → approval_requests.
+        getStatusForUpdate(fileId);
         String owner = documents.findOwner(fileId);
         if (owner == null) {
             throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);
         }
         if (!owner.equals(userId)) {
             throw new ForbiddenOperationException("문서 소유자만 상태를 변경할 수 있습니다.");
+        }
+        // 07/12 - C-2: 열린 승인 요청이 있는 동안 수동 상태 변경을 차단한다.
+        //   허용하면 예: UNDER_REVIEW→DRAFT 수동 전환 후, 열린 요청의 승인 확정(DRAFT→APPROVED 불허)·
+        //   반려/취소(DRAFT→DRAFT 동일 상태 불허)가 전부 전이 규칙에 막혀 요청을 영원히 닫을 수 없고,
+        //   open_marker UNIQUE 때문에 새 요청 생성도 불가능한 교착이 된다.
+        //   워크플로 경로(changeStatusAsWorkflow)는 승인 로직이 요청을 닫은 "뒤"에 호출하므로 검사하지 않는다.
+        if (approvals.findOpenByFile(fileId) != null) {
+            throw new IllegalStateException(
+                    "처리 대기 중인 승인 요청이 있어 상태를 직접 변경할 수 없습니다. 먼저 승인 요청을 취소하거나 결재를 완료하십시오.");
         }
         return changeStatusAsWorkflow(fileId, userId, targetStatus, reason);
     }
@@ -72,7 +104,8 @@ public class DocumentLifecycleService {
      */
     @Transactional
     public StatusView changeStatusAsWorkflow(String fileId, String userId, String targetStatus, String reason) {
-        String s = mapper.findStatus(fileId);
+        // 07/12 - C-1: 잠금 조회로 전환 — 전이 검사와 updateStatus 사이의 경합 차단.
+        String s = mapper.findStatusForUpdate(fileId);
         if (s == null) {
             throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);
         }

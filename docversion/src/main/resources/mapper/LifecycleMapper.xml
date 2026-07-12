@@ -9,6 +9,15 @@
         WHERE file_id = #{fileId} AND deleted_at IS NULL
     </select>
 
+    <!-- 07/12 - C-1: 문서 행 잠금 조회.
+         상태 검사·상태 변경·승인 판정이 이 잠금으로 직렬화된다.
+         잠금 순서 규약: 항상 documents 먼저, 그 다음 approval_requests (교착 방지). -->
+    <select id="findStatusForUpdate" resultType="string">
+        SELECT status FROM documents
+        WHERE file_id = #{fileId} AND deleted_at IS NULL
+        FOR UPDATE
+    </select>
+
     <!-- 상태 갱신 (status_updated_at, updated_at 동시 갱신) -->
     <update id="updateStatus">
         UPDATE documents

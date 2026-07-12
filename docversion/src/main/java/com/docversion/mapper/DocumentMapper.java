@@ -12,6 +12,9 @@ import java.util.Map;
 @Mapper
 public interface DocumentMapper {
 
+    /** 07/12 - RD-SRS-9.5 열람: 다운로드 파일명 산출용 현재 경로 조회. */
+    String findCurrentPath(@Param("fileId") String fileId);
+
     /**
      * 문서 master INSERT (createInitialVersion).
      */

@@ -49,4 +49,11 @@
           AND deleted_at IS NULL
     </select>
 
+
+    <!-- 07/12 - RD-SRS-9.5 열람: 현재 경로 (다운로드 파일명 산출용) -->
+    <select id="findCurrentPath" resultType="string">
+        SELECT current_path FROM documents
+        WHERE file_id = #{fileId} AND deleted_at IS NULL
+    </select>
+
 </mapper>

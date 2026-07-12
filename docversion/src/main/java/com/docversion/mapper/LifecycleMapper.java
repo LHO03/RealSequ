@@ -16,6 +16,9 @@ public interface LifecycleMapper {
     /** 현재 상태 조회 (soft delete 제외). 없으면 null. */
     String findStatus(@Param("fileId") String fileId);
 
+    /** 07/12 - C-1: 문서 행 FOR UPDATE 잠금 조회 (활성 트랜잭션 안에서만 의미 있음). */
+    String findStatusForUpdate(@Param("fileId") String fileId);
+
     /** 상태 갱신 + 상태 변경 시각/수정 시각 갱신. */
     int updateStatus(@Param("fileId") String fileId,
                      @Param("status") String status,

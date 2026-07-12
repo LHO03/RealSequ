@@ -3,6 +3,7 @@ package com.docversion.service;
 import com.docversion.domain.FileContent;
 import com.docversion.domain.VersionInfo;
 import com.docversion.event.VersionEvents;
+import com.docversion.mapper.ActivityMapper;
 import com.docversion.mapper.DocumentMapper;
 import com.docversion.mapper.FilesVersionMapper;
 import com.docversion.mapper.VersionDiffMapper;
@@ -37,6 +38,7 @@ public class DocumentVersionService {
     private final FilesVersionMapper filesVersionMapper;
     private final VersionDiffMapper versionDiffMapper;
     private final DocumentMapper documentMapper;
+    private final ActivityMapper activityMapper; // 07/12 - 9.3: 이력 조회용
     private final UuidGenerator uuid;
     private final VersionMetadata metadata;
     private final ApplicationEventPublisher events;
@@ -50,7 +52,8 @@ public class DocumentVersionService {
                                   UuidGenerator uuid,
                                   VersionMetadata metadata,
                                   ApplicationEventPublisher events,
-                                  NotificationService notifications) {
+                                  NotificationService notifications,
+                                  ActivityMapper activityMapper) {
         this.writeService = writeService;
         this.storage = storage;
         this.filesVersionMapper = filesVersionMapper;
@@ -60,6 +63,7 @@ public class DocumentVersionService {
         this.metadata = metadata;
         this.events = events;
         this.notifications = notifications;
+        this.activityMapper = activityMapper;
     }
 
     // ==========================================================
@@ -68,13 +72,19 @@ public class DocumentVersionService {
     //   경로는 클라이언트 자유 입력이 아니라 서버가 정규화해서 결정한다(보안 + 일관성).
     // ==========================================================
     public UploadOutcome upload(String userId, String folder, String originalName, FileContent content) {
+        return upload(userId, folder, originalName, content, null);
+    }
+
+    /** 07/12 - RD-SRS-9.3: 변경 사유(reason, 선택)를 받는 오버로드. */
+    public UploadOutcome upload(String userId, String folder, String originalName,
+                                FileContent content, String reason) {
         String path = canonicalPath(userId, folder, originalName);
         String existing = documentMapper.findFileIdByOwnerAndPath(userId, path);
         if (existing != null && !existing.isBlank()) {
-            VersionInfo v = onDocumentModified(userId, existing, content);
+            VersionInfo v = onDocumentModified(userId, existing, content, reason);
             return new UploadOutcome(false, path, existing, v);
         }
-        VersionInfo v = createInitialVersion(userId, path, content);
+        VersionInfo v = createInitialVersion(userId, path, content, reason);
         return new UploadOutcome(true, path, v.getFileId(), v);
     }
 
@@ -143,12 +153,62 @@ public class DocumentVersionService {
     }
 
     /** 업로드 결과: 새 문서 생성 여부 + 정규 경로 + fileId + 버전 정보. */
+    /** 07/12 - RD-SRS-9.5 열람: 콘텐츠 응답 묶음 (바이트 + 표시 파일명 + MIME). */
+    public record VersionContent(byte[] bytes, String filename, String mimetype) {
+    }
+
+    /**
+     * 07/12 - RD-SRS-9.5 "특정 시점의 버전을 확인하고 열람" 중 그동안 비어 있던 "열람".
+     * 접근 자격: 문서 소유자 또는 구독자(이해관계자 — 승인 요청자·승인자는 요청 시 자동 구독됨).
+     *   승인자가 결재 전에 내용을 봐야 하므로 소유자 단독보다 넓고, 전면 개방보다는 좁은 경계.
+     * 파일명: 현재 경로의 마지막 조각 + "_rev{n}" (버전을 구분해 저장하도록).
+     */
+    public VersionContent getVersionContent(String userId, String fileId, String versionId) {
+        String owner = documentMapper.findOwner(fileId);
+        if (owner == null) {
+            throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);
+        }
+        if (!owner.equals(userId) && !notifications.subscribers(fileId).contains(userId)) {
+            throw new ForbiddenOperationException("문서 소유자 또는 구독자(이해관계자)만 열람할 수 있습니다.");
+        }
+        Map<String, Object> v = filesVersionMapper.findVersionForContent(versionId);
+        if (v == null || !fileId.equals(String.valueOf(v.get("fileId")))) {
+            // 존재하지 않거나, 경로의 문서와 무관한 버전 ID(다른 문서 버전 훔쳐보기) → 동일하게 404
+            throw new IllegalArgumentException("버전을 찾을 수 없습니다: " + versionId);
+        }
+        FileContent content = storage.readFile(String.valueOf(v.get("storageKey")));
+
+        String path = documentMapper.findCurrentPath(fileId);
+        String base = (path == null || path.isBlank()) ? fileId
+                : path.substring(path.lastIndexOf('/') + 1);
+        long rev = v.get("revisionNo") == null ? 0L : ((Number) v.get("revisionNo")).longValue();
+        String filename = base + "_rev" + rev;
+        String mime = String.valueOf(v.get("mimetype"));
+        if (mime == null || mime.isBlank() || "null".equals(mime)) {
+            mime = "application/octet-stream";
+        }
+        return new VersionContent(content.data(), filename, mime);
+    }
+
     public record UploadOutcome(boolean created, String path, String fileId, VersionInfo version) {
     }
 
     // ==========================================================
     // RD-SRS-9.4: 두 버전 간 diff 조회 (version_diffs 캐시)
     // ==========================================================
+    /**
+     * 07/12 - RD-SRS-9.3: 문서 활동 이력 조회 — "기록"만 있고 "조회"가 없던 간극을 메운다.
+     * 변경자(user)·변경일시(timestamp)·행위(subject)·사유(subjectparams JSON의 reason)가 내려간다.
+     */
+    public List<Map<String, Object>> getActivity(String fileId, int limit, int offset) {
+        if (documentMapper.findOwner(fileId) == null) {
+            throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);
+        }
+        int safeLimit = Math.max(1, Math.min(limit, 100));
+        int safeOffset = Math.max(0, offset);
+        return activityMapper.listByFile(fileId, safeLimit, safeOffset);
+    }
+
     public Map<String, Object> getDiff(String fileId, String fromVersionId, String toVersionId) {
         return versionDiffMapper.findCached(fileId, fromVersionId, toVersionId);
     }
@@ -157,6 +217,11 @@ public class DocumentVersionService {
     // RD-SRS-9.1: 최초 버전 생성
     // ==========================================================
     public VersionInfo createInitialVersion(String userId, String filePath, FileContent content) {
+        return createInitialVersion(userId, filePath, content, null);
+    }
+
+    /** 07/12 - RD-SRS-9.3: 변경 사유(reason, 선택)를 받는 오버로드. */
+    public VersionInfo createInitialVersion(String userId, String filePath, FileContent content, String reason) {
         // 인증 3단계(3-A): 경로 위장 차단 — 클라이언트가 보낸 경로를 그대로 신뢰하지 않고,
         // 로그인 사용자 기준 정규 경로(/{userId}/files/...)로 서버가 재작성한다.
         // (bob이 path=/alice/files/x.txt 로 보내도 결과는 /bob/files/x.txt)
@@ -184,7 +249,7 @@ public class DocumentVersionService {
 
         // 2) DB 트랜잭션. 실패 시 저장된 파일 보상 삭제(C++ 보상 삭제 로직 대응).
         try {
-            writeService.persistInitialVersion(version, canonical);
+            writeService.persistInitialVersion(version, canonical, reason);
         } catch (RuntimeException e) {
             safeDelete(storageKey);
             throw new VersionOperationException("createInitialVersion DB 저장 실패", e);
@@ -202,6 +267,11 @@ public class DocumentVersionService {
     // RD-SRS-9.2: 문서 수정 → 새 버전 자동 생성
     // ==========================================================
     public VersionInfo onDocumentModified(String userId, String fileId, FileContent newContent) {
+        return onDocumentModified(userId, fileId, newContent, null);
+    }
+
+    /** 07/12 - RD-SRS-9.3: 변경 사유(reason, 선택)를 받는 오버로드. */
+    public VersionInfo onDocumentModified(String userId, String fileId, FileContent newContent, String reason) {
         // 인증 3단계(3-A): 소유권 검사 — 개인 소유 모델에서 문서 쓰기는 소유자만 가능.
         // 2단계에서 "누구인지"를 확보했다면, 여기서는 "이 문서에 쓸 자격이 있는지"를 본다.
         // 문서 없음 → IllegalArgument(404), 남의 문서 → Forbidden(403).
@@ -232,18 +302,14 @@ public class DocumentVersionService {
         storage.writeFile(storageKey, newContent);
 
         // 2) DB 트랜잭션: FOR UPDATE + revision 증가 + INSERT/UPDATE + 이력
+        // 07/12 - C-3: persistModifiedVersion은 이제 실패를 전부 예외로 알린다(null 반환 없음).
+        //   문서 없음/포인터 누락도 RuntimeException 계열이므로 아래 catch가 보상 삭제를 수행한다.
         VersionWriteService.ModifyResult result;
         try {
-            result = writeService.persistModifiedVersion(version);
+            result = writeService.persistModifiedVersion(version, reason);
         } catch (RuntimeException e) {
             safeDelete(storageKey);
             throw new VersionOperationException("onDocumentModified DB 저장 실패", e);
-        }
-        if (result == null) {
-            // 문서 없음: 저장한 파일 보상 삭제 후 빈 결과
-            safeDelete(storageKey);
-            log.warn("onDocumentModified: documents에 file_id={} 없음", fileId);
-            return new VersionInfo();
         }
 
         // 3) 커밋 이후 부수효과: diff 캐시 계산/저장 + 알림 (실패해도 버전 생성 성공)

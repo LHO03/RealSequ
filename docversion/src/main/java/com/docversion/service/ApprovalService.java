@@ -103,7 +103,9 @@ public class ApprovalService {
         }
 
         // 검토중 상태에서만 요청 가능
-        String status = lifecycle.getStatus(fileId).status();
+        // 07/12 - C-1: 잠금 조회 — 수동 상태 변경(changeStatus)과 문서 행에서 직렬화되어,
+        //   "검사 시점엔 검토중이었는데 커밋 시점엔 초안"인 TOCTOU 경합을 차단한다.
+        String status = lifecycle.getStatusForUpdate(fileId).status();
         if (!"UNDER_REVIEW".equals(status)) {
             throw new IllegalStateException("검토중 상태에서만 승인 요청을 생성할 수 있습니다. (먼저 문서를 검토 제출하십시오.)");
         }
@@ -156,7 +158,14 @@ public class ApprovalService {
     }
 
     private ApprovalState decide(String fileId, String actorId, String comment, boolean approved) {
-        Map<String, Object> open = mapper.findOpenByFile(fileId);
+        // 07/12 - C-1: 진입 잠금 (규약: documents 행 → approval_requests 행 순서).
+        //   요청 행 잠금으로 동시 판정이 직렬화되므로, 아래에서 목록을 읽고 메모리에서
+        //   집계하는 방식이 안전해진다. (잠금 없이는 두 승인자가 서로를 PENDING으로 본
+        //   스냅샷으로 각자 "미확정"을 계산해, 전원이 판정했는데도 요청이 영원히 OPEN으로
+        //   남는 결함이 있었다.) 잠금 이후의 일반 SELECT는 이 트랜잭션의 첫 일관 읽기라
+        //   직전 커밋까지 반영된 최신 스냅샷을 본다.
+        lifecycle.getStatusForUpdate(fileId);
+        Map<String, Object> open = mapper.findOpenByFileForUpdate(fileId);
         if (open == null) {
             throw new IllegalStateException("처리할 승인 요청이 없습니다.");
         }
@@ -293,7 +302,11 @@ public class ApprovalService {
      */
     @Transactional
     public ApprovalState retract(String fileId, String actorId, String comment) {
-        Map<String, Object> open = mapper.findOpenByFile(fileId);
+        // 07/12 - C-1: 진입 잠금 (documents → approval_requests) — 판정과 번복의 직렬화.
+        //   잠금이 없으면 "B가 집계하는 사이 A가 번복"하는 교차로, A가 PENDING인데
+        //   요청이 APPROVED로 확정되는 역방향 불일치가 가능했다.
+        lifecycle.getStatusForUpdate(fileId);
+        Map<String, Object> open = mapper.findOpenByFileForUpdate(fileId);
         if (open == null) {
             throw new IllegalStateException("번복할 수 있는 열린 요청이 없습니다. (확정된 판정은 번복 불가 — 새 승인 요청으로 정정하세요)");
         }
@@ -341,7 +354,9 @@ public class ApprovalService {
     /** 요청 취소: 요청자만. 문서 → DRAFT (검토를 접고 초안으로 되돌림). */
     @Transactional
     public ApprovalState cancel(String fileId, String actorId, String comment) {
-        Map<String, Object> open = mapper.findOpenByFile(fileId);
+        // 07/12 - C-1: 진입 잠금 (documents → approval_requests) — 판정 확정과 취소의 직렬화.
+        lifecycle.getStatusForUpdate(fileId);
+        Map<String, Object> open = mapper.findOpenByFileForUpdate(fileId);
         if (open == null) {
             throw new IllegalStateException("취소할 승인 요청이 없습니다.");
         }

@@ -28,6 +28,19 @@
         LIMIT 1
     </select>
 
+    <!-- 07/12 - C-1: OPEN 요청 행 잠금 조회. 판정(decide)·번복(retract)·취소(cancel)가
+         이 잠금으로 직렬화되어, "각자 상대를 PENDING으로 본 스냅샷 집계" 때문에
+         요청이 영구 미확정으로 남는 동시성 결함을 차단한다.
+         잠금 순서 규약: documents 행을 먼저 잠근 뒤 호출할 것. -->
+    <select id="findOpenByFileForUpdate" resultType="map">
+        SELECT id, file_id AS fileId, requester_id AS requesterId,
+               mode, status, created_at AS createdAt
+        FROM approval_requests
+        WHERE file_id = #{fileId} AND status = 'OPEN'
+        LIMIT 1
+        FOR UPDATE
+    </select>
+
     <!-- 요청의 승인자 목록 (순번 오름차순) -->
     <select id="listApprovers" resultType="map">
         SELECT approver_id AS approverId, seq,

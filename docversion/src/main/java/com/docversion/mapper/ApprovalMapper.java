@@ -30,6 +30,9 @@ public interface ApprovalMapper {
     /** 문서의 현재 열린(OPEN) 요청 조회. 없으면 null. */
     Map<String, Object> findOpenByFile(@Param("fileId") String fileId);
 
+    /** 07/12 - C-1: OPEN 요청 행 FOR UPDATE 잠금 조회 (판정·번복·취소 직렬화용). */
+    Map<String, Object> findOpenByFileForUpdate(@Param("fileId") String fileId);
+
     /** 요청의 승인자 목록 (seq 오름차순): approverId, seq, decision, decidedAt, comment, actedBy. */
     List<Map<String, Object>> listApprovers(@Param("requestId") String requestId);
 

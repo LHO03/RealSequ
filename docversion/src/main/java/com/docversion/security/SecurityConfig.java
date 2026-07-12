@@ -47,6 +47,13 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/notifications").authenticated()
                 .requestMatchers(HttpMethod.POST, "/api/notifications/*/read").authenticated()
                 .requestMatchers(HttpMethod.POST, "/api/documents/*/subscribe", "/api/documents/*/unsubscribe").authenticated()
+                // 07/12 - I-2: 읽기 개방 범위 축소.
+                //   outbox는 전 사용자의 알림 payload(누가 누구에게 어떤 문서로 결재를 올렸는지)가
+                //   담기므로 운영 점검용 — 관리자 전용. diff는 문서 본문 텍스트(hunks)가 그대로
+                //   내려가는 내용성 정보라 최소 로그인 필수. 버전 콘텐츠(9.5 열람)도 동일.
+                .requestMatchers(HttpMethod.GET, "/api/notifications/outbox").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.GET, "/api/documents/*/diff").authenticated()
+                .requestMatchers(HttpMethod.GET, "/api/documents/*/versions/*/content").authenticated()
                 // 인증 3단계(3-C): 보존 정책은 관리자 전용 (조회 포함 — 정책 관리는 운영 영역).
                 // hasRole("ADMIN") = user_roles에 ADMIN이 있는 계정만. 그 외 로그인 사용자는 403.
                 .requestMatchers("/api/retention/**").hasRole("ADMIN")

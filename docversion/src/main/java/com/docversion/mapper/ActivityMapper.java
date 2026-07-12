@@ -18,4 +18,9 @@ public interface ActivityMapper {
                        @Param("file") String file,
                        @Param("objectType") String objectType,
                        @Param("objectId") String objectId);
+
+    /** 07/12 - RD-SRS-9.3: 문서별 활동 이력 조회 (최신순, 페이지네이션). */
+    java.util.List<java.util.Map<String, Object>> listByFile(@Param("fileId") String fileId,
+                                                             @Param("limit") int limit,
+                                                             @Param("offset") int offset);
 }

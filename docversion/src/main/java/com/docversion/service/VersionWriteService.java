@@ -40,6 +40,12 @@ public class VersionWriteService {
      */
     @Transactional
     public void persistInitialVersion(VersionInfo version, String currentPath) {
+        persistInitialVersion(version, currentPath, null);
+    }
+
+    /** 07/12 - RD-SRS-9.3: 사용자 입력 변경 사유(reason) 수용 — 없으면 기존 자동 문구. */
+    @Transactional
+    public void persistInitialVersion(VersionInfo version, String currentPath, String userReason) {
         documentMapper.insertDocument(
                 version.getFileId(), version.getUserId(),
                 currentPath, currentPath,
@@ -48,23 +54,35 @@ public class VersionWriteService {
 
         filesVersionMapper.insertVersion(version);
 
-        setMetadataReason(version.getVersionId(), "revision_no=1");
+        String reason = (userReason == null || userReason.isBlank())
+                ? "revision_no=1" : userReason.trim();
+        setMetadataReason(version.getVersionId(), reason);
         audit.record(version.getUserId(), version.getFileId(),
-                "version_created", version.getVersionId(), Map.of("reason", "revision_no=1"));
+                "version_created", version.getVersionId(), Map.of("reason", reason));
     }
 
     /**
      * onDocumentModified DB 단계: FOR UPDATE로 라이브 포인터 잠그고 revision_no를 단조 증가.
      * <p>반환: 확정된 (previousVersionId, newRevisionNo, previousStorageKey).
-     * 문서 없음/이전 storage_key 누락은 null 반환(호출자가 실패 처리 + 롤백).
+     * 07/12 - C-3: 문서 없음도 storage_key 누락과 같은 IllegalStateException으로 통일.
+     *   (호출자 onDocumentModified가 3-A에서 findOwner로 존재를 이미 확인했으므로,
+     *    여기서 문서가 없다는 것은 정합성 이상 — null 반환의 "빈 결과" 경로는 도달
+     *    불가능한 죽은 코드였고, 테스트가 그 경로를 기대해 현재 코드와 어긋나 있었다.)
      */
     @Transactional
     public ModifyResult persistModifiedVersion(VersionInfo newVersion) {
+        return persistModifiedVersion(newVersion, null);
+    }
+
+    /** 07/12 - RD-SRS-9.3: 사용자 입력 변경 사유(reason) 수용 — 없으면 "rev a -> b" 자동 문구. */
+    @Transactional
+    public ModifyResult persistModifiedVersion(VersionInfo newVersion, String userReason) {
         // FOR UPDATE — 동시 수정 시 같은 revision_no 발급 방지(C++ TODO 해소).
         // UNIQUE(file_id, revision_no)는 최종 방어선, 이 lock이 1차 방어선.
         Map<String, Object> live = documentMapper.findLivePointerForUpdate(newVersion.getFileId());
         if (live == null) {
-            return null; // 문서 없음 → 호출자가 실패 로깅 + 롤백
+            // 07/12 - C-3: 소유권 검사를 통과한 뒤 포인터가 없으면 데이터 정합성 이상
+            throw new IllegalStateException("문서 라이브 포인터 없음: " + newVersion.getFileId());
         }
 
         String previousVersionId = asString(live.get("currentVersionId"));
@@ -83,10 +101,13 @@ public class VersionWriteService {
         documentMapper.updateLivePointer(newVersion.getFileId(),
                 newVersion.getVersionId(), newRevisionNo, newVersion.getTimestamp());
 
-        String changeNote = "rev " + previousRevisionNo + " -> " + newRevisionNo;
+        String changeNote = (userReason == null || userReason.isBlank())
+                ? ("rev " + previousRevisionNo + " -> " + newRevisionNo) : userReason.trim();
         setMetadataReason(newVersion.getVersionId(), changeNote);
         audit.record(newVersion.getUserId(), newVersion.getFileId(),
-                "version_updated", newVersion.getVersionId(), Map.of("reason", changeNote));
+                "version_updated", newVersion.getVersionId(), Map.of(
+                        "reason", changeNote,
+                        "revisions", previousRevisionNo + "->" + newRevisionNo));
 
         // RD-SRS-9.9 / 목표 간극(가): 새 버전 업로드를 이해관계자(구독자)에게 알림.
         // 버전 기록과 같은 트랜잭션으로 적재 — 커밋되면 알림도 반드시 함께 확정된다.
