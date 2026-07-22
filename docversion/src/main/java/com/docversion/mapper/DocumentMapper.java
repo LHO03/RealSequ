@@ -21,6 +21,7 @@ public interface DocumentMapper {
     int insertDocument(@Param("fileId") String fileId,
                        @Param("ownerUserId") String ownerUserId,
                        @Param("currentPath") String currentPath,
+                       @Param("pathHash") String pathHash,
                        @Param("originalName") String originalName,
                        @Param("currentVersionId") String currentVersionId,
                        @Param("currentRevisionNo") long currentRevisionNo,

@@ -18,7 +18,13 @@ RUN mvn -q -B dependency:go-offline
 # 테스트는 Testcontainers(Docker 필요)라 이미지 빌드 단계에서는 건너뛴다.
 # (parity 테스트는 Docker가 있는 환경에서 `mvn test`로 별도 실행)
 COPY src ./src
-RUN mvn -q -B clean package -DskipTests
+# 07/22: 빌드 안전장치 — 최신 수정(null 방어)이 소스에 있는지 확인하고, 없으면 빌드를 즉시 실패시킨다.
+#   옛 소스로 빌드되는 사고(다른 폴더/브랜치 복사본)를 컴파일 단계에서 바로 드러내기 위함.
+RUN grep -q "roles != null" src/main/java/com/docversion/service/DocumentAccessPolicy.java \
+    && grep -q "subs != null" src/main/java/com/docversion/service/DocumentAccessPolicy.java \
+    || (echo "BUILD ABORTED: DocumentAccessPolicy.java is an OLD version (null-guard missing)" && exit 1)
+ARG CACHEBUST=1
+RUN echo "cache-bust=${CACHEBUST}" && mvn -q -B clean package -DskipTests
 
 # ---- 2단계: 실행 ----
 FROM eclipse-temurin:21-jre

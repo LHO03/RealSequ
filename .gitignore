@@ -40,5 +40,10 @@
 # debug information files
 *.dwo
 
+<<<<<<< HEAD
 #
 target/
+=======
+**/.gradle/
+**/target/
+>>>>>>> 632418d (update)

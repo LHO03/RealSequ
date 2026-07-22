@@ -28,6 +28,8 @@ public class NotificationOutboxWorker {
     private static final Logger log = LoggerFactory.getLogger(NotificationOutboxWorker.class);
     private static final int BATCH = 20;
     private static final int MAX_RETRY = 3;
+    /** 07/12 - I-4: 이 시간(초) 넘게 PROCESSING이면 워커 사망으로 보고 회수. 발송 1건 처리 시간 대비 충분히 크게. */
+    private static final long STALE_LOCK_SECONDS = 300;
 
     private final NotificationMapper mapper;
     private final NotificationSender sender;
@@ -41,6 +43,12 @@ public class NotificationOutboxWorker {
     @Scheduled(fixedDelay = 5000) // 5초마다
     public void process() {
         long now = Instant.now().getEpochSecond();
+        // 07/12 - I-4: 죽은 워커가 남긴 고아 PROCESSING 회수 (자기 자신이 정상 처리 중인
+        //   항목은 locked_at이 최근이므로 걸리지 않는다)
+        int reclaimed = mapper.reclaimStale(now - STALE_LOCK_SECONDS);
+        if (reclaimed > 0) {
+            log.warn("[아웃박스] 고아 PROCESSING {}건을 PENDING으로 회수 (워커 중단 흔적)", reclaimed);
+        }
         List<Map<String, Object>> batch = mapper.findSendable(now, BATCH);
         for (Map<String, Object> row : batch) {
             long id = ((Number) row.get("id")).longValue();

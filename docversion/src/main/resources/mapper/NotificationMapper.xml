@@ -64,6 +64,18 @@
     </select>
 
     <!-- claim: PENDING인 것만 PROCESSING으로. 동시 워커 안전. -->
+    <!-- 07/12 - I-4: 고아 PROCESSING 회수.
+         워커가 claim 직후 죽으면 항목이 PROCESSING으로 영구 잔류한다(locked_at은 있었지만
+         회수 쿼리가 없었음). locked_at이 컷오프보다 오래된 항목을 PENDING으로 되돌려
+         다음 주기에 재발송되게 한다. 같은 항목의 이중 발송 가능성(최대 1회)은
+         "최소 1회 전달(at-least-once)" 정책으로 수용 — 인앱은 dedup_key로, 이메일은
+         수신자가 중복 1통을 받는 수준으로 무해하다. -->
+    <update id="reclaimStale">
+        UPDATE notification_outbox
+        SET status = 'PENDING', locked_by = NULL, locked_at = NULL
+        WHERE status = 'PROCESSING' AND locked_at &lt; #{cutoff}
+    </update>
+
     <update id="claim">
         UPDATE notification_outbox
         SET status = 'PROCESSING', locked_by = #{workerId}, locked_at = #{lockedAt}

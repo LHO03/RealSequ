@@ -6,10 +6,10 @@
     <!-- createInitialVersion: documents INSERT (C++ 직역) -->
     <insert id="insertDocument">
         INSERT INTO documents
-            (file_id, owner_user_id, current_path, original_name,
+            (file_id, owner_user_id, current_path, path_hash, original_name,
              current_version_id, current_revision_no, created_at, updated_at)
         VALUES
-            (#{fileId}, #{ownerUserId}, #{currentPath}, #{originalName},
+            (#{fileId}, #{ownerUserId}, #{currentPath}, #{pathHash}, #{originalName},
              #{currentVersionId}, #{currentRevisionNo}, #{createdAt}, #{updatedAt})
     </insert>
 

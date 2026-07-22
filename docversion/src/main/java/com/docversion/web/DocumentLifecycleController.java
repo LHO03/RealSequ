@@ -20,16 +20,22 @@ import java.util.Map;
 public class DocumentLifecycleController {
 
     private final DocumentLifecycleService service;
+    private final com.docversion.service.DocumentAccessPolicy access; // 07/19 - P1-②
 
-    public DocumentLifecycleController(DocumentLifecycleService service) {
+    public DocumentLifecycleController(DocumentLifecycleService service,
+                                       com.docversion.service.DocumentAccessPolicy access) {
         this.service = service;
+        this.access = access;
     }
 
-    /** 현재 상태 + 전이 가능한 다음 상태 목록 조회. */
+    /** 현재 상태 + 전이 가능한 다음 상태 목록 조회. 07/19 - P1-②: 이해관계자만. */
     @GetMapping("/{fileId}/status")
-    public StatusView getStatus(@PathVariable String fileId) {
+    public StatusView getStatus(java.security.Principal principal, @PathVariable String fileId) {
         try {
+            access.requireRead(fileId, principal.getName());
             return service.getStatus(fileId);
+        } catch (com.docversion.service.ForbiddenOperationException e) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, e.getMessage());
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         }
@@ -52,9 +58,16 @@ public class DocumentLifecycleController {
         }
     }
 
-    /** 상태 변경 이력 (최신순). */
+    /** 상태 변경 이력 (최신순). 07/19 - P1-②: 이해관계자만. */
     @GetMapping("/{fileId}/status-history")
-    public List<Map<String, Object>> history(@PathVariable String fileId) {
+    public List<Map<String, Object>> history(java.security.Principal principal, @PathVariable String fileId) {
+        try {
+            access.requireRead(fileId, principal.getName());
+        } catch (com.docversion.service.ForbiddenOperationException e) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
         return service.getStatusHistory(fileId);
     }
 }

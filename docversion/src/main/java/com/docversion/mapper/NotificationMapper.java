@@ -55,6 +55,9 @@ public interface NotificationMapper {
     List<Map<String, Object>> findSendable(@Param("now") long now, @Param("limit") int limit);
 
     /** claim: PENDING→PROCESSING (성공 시 1). 다른 워커가 이미 가져갔으면 0. */
+    /** 07/12 - I-4: 고아 PROCESSING(locked_at &lt; cutoff)을 PENDING으로 회수. 회수 건수 반환. */
+    int reclaimStale(@Param("cutoff") long cutoff);
+
     int claim(@Param("id") long id, @Param("workerId") String workerId, @Param("lockedAt") long lockedAt);
 
     int markSent(@Param("id") long id, @Param("sentAt") long sentAt);

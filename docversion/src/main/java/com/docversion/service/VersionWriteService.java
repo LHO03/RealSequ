@@ -46,9 +46,12 @@ public class VersionWriteService {
     /** 07/12 - RD-SRS-9.3: 사용자 입력 변경 사유(reason) 수용 — 없으면 기존 자동 문구. */
     @Transactional
     public void persistInitialVersion(VersionInfo version, String currentPath, String userReason) {
+        // 07/12 - I-1: UNIQUE(owner_user_id, path_hash)가 동시 생성 경합의 최종 방어선.
+        //   중복이면 여기서 DuplicateKeyException → 호출자(createInitialVersion)가
+        //   "이미 생성된 문서에 새 버전 추가"로 폴백한다.
         documentMapper.insertDocument(
                 version.getFileId(), version.getUserId(),
-                currentPath, currentPath,
+                currentPath, sha256Hex(currentPath), currentPath,
                 version.getVersionId(), version.getRevisionNo(),
                 version.getTimestamp(), version.getTimestamp());
 
@@ -123,6 +126,19 @@ public class VersionWriteService {
      * RD-SRS-9.3 보조: 버전 metadata에 변경 사유를 JSON_SET. (버전 데이터 관심사라 여기 유지 —
      * activity 이력 기록은 AuditLogService로 이관됨.)
      */
+    /** 07/12 - I-1: 경로 해시 (V10의 SHA2(...,256)와 동일한 소문자 16진수). */
+    private static String sha256Hex(String text) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] d = md.digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(d.length * 2);
+            for (byte b : d) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 미지원 JVM", e); // 표준 알고리즘 — 발생 불가
+        }
+    }
+
     private void setMetadataReason(String versionId, String reason) {
         if (reason != null && !reason.isBlank() && versionId != null && !versionId.isBlank()) {
             filesVersionMapper.setMetadataReason(versionId, reason);

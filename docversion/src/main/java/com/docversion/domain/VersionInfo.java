@@ -1,5 +1,7 @@
 package com.docversion.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import java.util.HashMap;
 import java.util.Map;
 
@@ -51,9 +53,15 @@ public class VersionInfo {
     public String getMimetype() { return mimetype; }
     public void setMimetype(String mimetype) { this.mimetype = mimetype; }
 
+    /** 07/19 - P1-②: 내부 저장 경로는 API 응답(JSON)에서 숨긴다 — 서버 내부 구조 노출 방지. */
+    @JsonIgnore
     public String getStorageKey() { return storageKey; }
     public void setStorageKey(String storageKey) { this.storageKey = storageKey; }
 
+    // 07/19 - P1-②: 원본 metadata JSON 문자열은 응답에서 제외한다(외부 리뷰 지적).
+    //   내부 로직과 DB 매핑은 필드에 직접 접근하므로 영향 없고, 표시용 값은
+    //   파싱된 metadataMap(author·reason 등)으로만 내려간다.
+    @JsonIgnore
     public String getMetadata() { return metadata; }
     public void setMetadata(String metadata) { this.metadata = metadata; }
 

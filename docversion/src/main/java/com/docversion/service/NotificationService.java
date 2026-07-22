@@ -1,6 +1,7 @@
 package com.docversion.service;
 
 import com.docversion.mapper.AccountMapper;
+import com.docversion.mapper.DocumentMapper;
 import com.docversion.mapper.NotificationMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -25,13 +26,16 @@ public class NotificationService {
     private final NotificationMapper mapper;
     private final UuidGenerator uuid;
     private final AccountMapper accounts;
+    private final DocumentMapper documents; // 07/19 - P1-①: API 구독 인가(소유자 검사)용
     private final boolean emailEnabled;
 
     public NotificationService(NotificationMapper mapper, UuidGenerator uuid, AccountMapper accounts,
+                               DocumentMapper documents,
                                @Value("${docversion.notify.email-enabled:true}") boolean emailEnabled) {
         this.mapper = mapper;
         this.uuid = uuid;
         this.accounts = accounts;
+        this.documents = documents;
         this.emailEnabled = emailEnabled;
     }
 
@@ -83,7 +87,26 @@ public class NotificationService {
         }
     }
 
-    /** 파일 구독(이해관계자 등록). 이미 있으면 무시. */
+    /**
+     * 07/19 - P1-①: API 경유 구독 등록 — 소유자만 허용.
+     * 배경(외부 리뷰 지적): 구독에 권한 검사가 없어, 임의 fileId로 자기 구독 후
+     * 버전 콘텐츠(9.5, "소유자 또는 구독자" 허용)를 내려받는 인가 우회가 가능했다.
+     * 승인 요청자·승인자의 자동 구독은 서비스 내부에서 subscribe()를 직접 호출하므로
+     * 이 검사의 영향을 받지 않는다.
+     */
+    public void subscribeChecked(String fileId, String userId) {
+        String owner = documents.findOwner(fileId);
+        if (owner == null) {
+            throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);
+        }
+        if (!owner.equals(userId)) {
+            throw new ForbiddenOperationException(
+                    "문서 소유자만 구독을 등록할 수 있습니다. (승인 관계자는 승인 요청 시 자동 등록됩니다)");
+        }
+        subscribe(fileId, userId);
+    }
+
+    /** 파일 구독(이해관계자 등록). 이미 있으면 무시. — 내부 자동 구독 전용 경로 */
     public void subscribe(String fileId, String userId) {
         if (userId == null || userId.isBlank()) {
             return;

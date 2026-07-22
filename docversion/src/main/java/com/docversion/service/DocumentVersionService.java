@@ -43,6 +43,7 @@ public class DocumentVersionService {
     private final VersionMetadata metadata;
     private final ApplicationEventPublisher events;
     private final NotificationService notifications;
+    private final DocumentAccessPolicy access; // 07/19 - P1-②: 읽기 인가 단일 관문
 
     public DocumentVersionService(VersionWriteService writeService,
                                   StorageService storage,
@@ -53,7 +54,8 @@ public class DocumentVersionService {
                                   VersionMetadata metadata,
                                   ApplicationEventPublisher events,
                                   NotificationService notifications,
-                                  ActivityMapper activityMapper) {
+                                  ActivityMapper activityMapper,
+                                  DocumentAccessPolicy access) {
         this.writeService = writeService;
         this.storage = storage;
         this.filesVersionMapper = filesVersionMapper;
@@ -64,6 +66,7 @@ public class DocumentVersionService {
         this.events = events;
         this.notifications = notifications;
         this.activityMapper = activityMapper;
+        this.access = access;
     }
 
     // ==========================================================
@@ -164,13 +167,8 @@ public class DocumentVersionService {
      * 파일명: 현재 경로의 마지막 조각 + "_rev{n}" (버전을 구분해 저장하도록).
      */
     public VersionContent getVersionContent(String userId, String fileId, String versionId) {
-        String owner = documentMapper.findOwner(fileId);
-        if (owner == null) {
-            throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);
-        }
-        if (!owner.equals(userId) && !notifications.subscribers(fileId).contains(userId)) {
-            throw new ForbiddenOperationException("문서 소유자 또는 구독자(이해관계자)만 열람할 수 있습니다.");
-        }
+        // 07/19 - P1-②: 개별 검사 → 중앙 정책으로 일원화 (소유자/구독자/ADMIN)
+        access.requireRead(fileId, userId);
         Map<String, Object> v = filesVersionMapper.findVersionForContent(versionId);
         if (v == null || !fileId.equals(String.valueOf(v.get("fileId")))) {
             // 존재하지 않거나, 경로의 문서와 무관한 버전 ID(다른 문서 버전 훔쳐보기) → 동일하게 404
@@ -200,16 +198,15 @@ public class DocumentVersionService {
      * 07/12 - RD-SRS-9.3: 문서 활동 이력 조회 — "기록"만 있고 "조회"가 없던 간극을 메운다.
      * 변경자(user)·변경일시(timestamp)·행위(subject)·사유(subjectparams JSON의 reason)가 내려간다.
      */
-    public List<Map<String, Object>> getActivity(String fileId, int limit, int offset) {
-        if (documentMapper.findOwner(fileId) == null) {
-            throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);
-        }
+    public List<Map<String, Object>> getActivity(String userId, String fileId, int limit, int offset) {
+        access.requireRead(fileId, userId); // 07/19 - P1-②: 존재 검사(404 사유) 포함
         int safeLimit = Math.max(1, Math.min(limit, 100));
         int safeOffset = Math.max(0, offset);
         return activityMapper.listByFile(fileId, safeLimit, safeOffset);
     }
 
-    public Map<String, Object> getDiff(String fileId, String fromVersionId, String toVersionId) {
+    public Map<String, Object> getDiff(String userId, String fileId, String fromVersionId, String toVersionId) {
+        access.requireRead(fileId, userId); // 07/19 - P1-②
         return versionDiffMapper.findCached(fileId, fromVersionId, toVersionId);
     }
 
@@ -250,6 +247,18 @@ public class DocumentVersionService {
         // 2) DB 트랜잭션. 실패 시 저장된 파일 보상 삭제(C++ 보상 삭제 로직 대응).
         try {
             writeService.persistInitialVersion(version, canonical, reason);
+        } catch (org.springframework.dao.DuplicateKeyException dup) {
+            // 07/12 - I-1: 같은 (소유자, 경로)의 동시 생성 경합 — V10 UNIQUE가 두 번째
+            //   INSERT를 거부한 경우. 승자가 만든 문서가 이미 존재하므로, 이 요청은
+            //   "새 문서 생성"이 아니라 "그 문서에 새 버전 추가"로 전환하는 것이 사용자
+            //   의도(같은 자리에 저장)에 맞는 동작이다. 이번 시도에서 쓴 파일은 보상 삭제.
+            safeDelete(storageKey);
+            String existing = documentMapper.findFileIdByOwnerAndPath(userId, canonical);
+            if (existing != null && !existing.isBlank()) {
+                log.info("createInitialVersion: 동시 생성 경합 감지 → 기존 문서에 버전 추가로 폴백 (fileId={})", existing);
+                return onDocumentModified(userId, existing, content, reason);
+            }
+            throw new VersionOperationException("createInitialVersion 경로 중복(경합) 후 재조회 실패", dup);
         } catch (RuntimeException e) {
             safeDelete(storageKey);
             throw new VersionOperationException("createInitialVersion DB 저장 실패", e);
@@ -329,6 +338,7 @@ public class DocumentVersionService {
     // ==========================================================
     public List<VersionInfo> getVersionsAtTime(String userId, String fileId,
                                                long targetTimestamp, int limit, int offset) {
+        access.requireRead(fileId, userId); // 07/19 - P1-②: 기존 미사용이던 userId를 인가에 사용
         // limit/offset 방어 (C++와 동일 범위)
         if (limit < 1) limit = 1;
         else if (limit > 100) limit = 100;

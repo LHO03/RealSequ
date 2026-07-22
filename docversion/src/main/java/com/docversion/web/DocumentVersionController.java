@@ -75,7 +75,7 @@ public class DocumentVersionController {
         }
     }
 
-    /** RD-SRS-9.5: 특정 시점 버전 목록. targetTimestamp=0이면 전체 최신순. (읽기 — 비로그인 허용) */
+    /** RD-SRS-9.5: 특정 시점 버전 목록. 07/19 - P1-②: 로그인 + 소유자/이해관계자/ADMIN만. */
     @GetMapping("/{fileId}/versions")
     public List<VersionInfo> getVersions(Principal principal,
                                          @PathVariable String fileId,
@@ -83,17 +83,25 @@ public class DocumentVersionController {
                                          @RequestParam(defaultValue = "50") int limit,
                                          @RequestParam(defaultValue = "0") int offset) {
         long ts = targetTimestamp > 0 ? targetTimestamp : System.currentTimeMillis() / 1000;
-        String who = principal != null ? principal.getName() : "anonymous";
-        return service.getVersionsAtTime(who, fileId, ts, limit, offset);
+        try {
+            return service.getVersionsAtTime(principal.getName(), fileId, ts, limit, offset);
+        } catch (ForbiddenOperationException e) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
     }
 
     /** 07/12 - RD-SRS-9.3: 문서 활동 이력 조회 (변경자·일시·행위·사유). */
     @GetMapping("/{fileId}/activity")
-    public List<Map<String, Object>> getActivity(@PathVariable String fileId,
+    public List<Map<String, Object>> getActivity(Principal principal,
+                                                 @PathVariable String fileId,
                                                  @RequestParam(defaultValue = "50") int limit,
                                                  @RequestParam(defaultValue = "0") int offset) {
         try {
-            return service.getActivity(fileId, limit, offset);
+            return service.getActivity(principal.getName(), fileId, limit, offset);
+        } catch (ForbiddenOperationException e) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, e.getMessage());
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         }
@@ -104,10 +112,18 @@ public class DocumentVersionController {
      * 캐시 miss면 204 No Content.
      */
     @GetMapping("/{fileId}/diff")
-    public ResponseEntity<Map<String, Object>> getDiff(@PathVariable String fileId,
+    public ResponseEntity<Map<String, Object>> getDiff(Principal principal,
+                                                       @PathVariable String fileId,
                                                        @RequestParam String fromVersionId,
                                                        @RequestParam String toVersionId) {
-        Map<String, Object> diff = service.getDiff(fileId, fromVersionId, toVersionId);
+        Map<String, Object> diff;
+        try {
+            diff = service.getDiff(principal.getName(), fileId, fromVersionId, toVersionId);
+        } catch (ForbiddenOperationException e) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
         return diff == null ? ResponseEntity.noContent().build() : ResponseEntity.ok(diff);
     }
 

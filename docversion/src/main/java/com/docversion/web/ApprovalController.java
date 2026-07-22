@@ -18,15 +18,21 @@ import java.security.Principal;
 public class ApprovalController {
 
     private final ApprovalService service;
+    private final com.docversion.service.DocumentAccessPolicy access; // 07/19 - P1-②
 
-    public ApprovalController(ApprovalService service) {
+    public ApprovalController(ApprovalService service,
+                              com.docversion.service.DocumentAccessPolicy access) {
         this.service = service;
+        this.access = access;
     }
 
-    /** 현재 열린 요청 + 요청 이력. (읽기 — 비로그인 허용) */
+    /** 현재 열린 요청 + 요청 이력. 07/19 - P1-②: 이해관계자만. */
     @GetMapping("/{fileId}/approval")
-    public ApprovalState get(@PathVariable String fileId) {
-        return service.getState(fileId);
+    public ApprovalState get(java.security.Principal principal, @PathVariable String fileId) {
+        return run(() -> {
+            access.requireRead(fileId, principal.getName());
+            return service.getState(fileId);
+        });
     }
 
     /** 승인 요청 생성 (V8 다중). 요청자 = 로그인 사용자.

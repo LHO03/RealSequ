@@ -2,6 +2,12 @@ spring:
   application:
     name: docversion-core
 
+  # 07/19 - P1-⑤: 기본 활성 프로필 = demo.
+  #   demo에서만 DefaultAccountsInitializer가 데모 계정(alice/bob/admin)을 시드한다.
+  #   운영 배포 시 SPRING_PROFILES_ACTIVE=prod 로 기동하면 데모 계정이 생성되지 않는다.
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:demo}
+
   # 알림 이메일 발송 (RD-SRS-9.9). 개발/시연은 MailHog(가짜 SMTP) — compose가 host를 mailhog로 덮어씀.
   mail:
     host: ${SPRING_MAIL_HOST:localhost}

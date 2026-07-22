@@ -6,6 +6,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import jakarta.servlet.DispatcherType;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -23,6 +25,7 @@ import java.util.Map;
  * 이는 보안 강화 단계에서 다시 다룬다.
  */
 @Configuration
+@EnableWebSecurity
 public class SecurityConfig {
 
     private final ObjectMapper json = new ObjectMapper();
@@ -36,32 +39,35 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
             .authorizeHttpRequests(auth -> auth
-                // 2-B 전환: 버전·업로드 "쓰기" 창구는 로그인 필수
-                .requestMatchers(HttpMethod.POST, "/api/documents/upload", "/api/documents").authenticated()
-                .requestMatchers(HttpMethod.POST, "/api/documents/*/versions").authenticated()
-                // 2-C 전환: 문서 상태 변경도 로그인 필수
-                .requestMatchers(HttpMethod.POST, "/api/documents/*/status").authenticated()
-                // 2-D 전환: 승인 워크플로(요청·승인·반려·취소)도 로그인 필수
-                .requestMatchers(HttpMethod.POST, "/api/documents/*/approval/**").authenticated()
-                // 2-E 전환: 내 알림·구독은 로그인 필수
-                .requestMatchers(HttpMethod.GET, "/api/notifications").authenticated()
-                .requestMatchers(HttpMethod.POST, "/api/notifications/*/read").authenticated()
-                .requestMatchers(HttpMethod.POST, "/api/documents/*/subscribe", "/api/documents/*/unsubscribe").authenticated()
-                // 07/12 - I-2: 읽기 개방 범위 축소.
-                //   outbox는 전 사용자의 알림 payload(누가 누구에게 어떤 문서로 결재를 올렸는지)가
-                //   담기므로 운영 점검용 — 관리자 전용. diff는 문서 본문 텍스트(hunks)가 그대로
-                //   내려가는 내용성 정보라 최소 로그인 필수. 버전 콘텐츠(9.5 열람)도 동일.
+                // 07/22: 컨트롤러가 던진 404/500 오류는 Spring 내부에서 /error로 재디스패치된다.
+                //   /error는 /api/** 패턴이 아니므로 anyRequest().denyAll()에 걸려, 원래 404·500이어야
+                //   할 응답이 accessDeniedHandler의 403으로 위장되는 문제가 있었다. ERROR 디스패치는
+                //   인가 검사에서 제외하여, 실제 상태코드(404는 404, 오류는 500)가 드러나게 한다.
+                .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                // 07/19 - P1-②: 기본 거부(deny-by-default)로 전환 (외부 리뷰 지적 수용).
+                //   기존 "필요한 곳만 잠그고 나머지 permitAll" 방식은 새 엔드포인트가
+                //   추가될 때마다 자동으로 공개되는 함정이 있었다(버전 목록·상태·승인
+                //   이력 등 문서 메타데이터가 실제로 무인증 노출됨). 이제는 공개 목록을
+                //   명시하고, 나머지 /api/**는 로그인 필수 + 각 창구의 객체 인가
+                //   (DocumentAccessPolicy.requireRead 등)로 이중 검사한다.
+                .requestMatchers("/", "/index.html", "/favicon.ico").permitAll()
+                .requestMatchers("/api/auth/**").permitAll()          // 로그인/로그아웃/내 정보
+                .requestMatchers("/actuator/health").permitAll()      // 기동 확인
+                // 관리자 전용 영역
                 .requestMatchers(HttpMethod.GET, "/api/notifications/outbox").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.GET, "/api/documents/*/diff").authenticated()
-                .requestMatchers(HttpMethod.GET, "/api/documents/*/versions/*/content").authenticated()
-                // 인증 3단계(3-C): 보존 정책은 관리자 전용 (조회 포함 — 정책 관리는 운영 영역).
-                // hasRole("ADMIN") = user_roles에 ADMIN이 있는 계정만. 그 외 로그인 사용자는 403.
                 .requestMatchers("/api/retention/**").hasRole("ADMIN")
-                // 4-C: 승인 위임 — "나의 위임"이므로 조회 포함 로그인 필수
-                .requestMatchers("/api/approval/delegation/**").authenticated()
-                // 그 외(읽기, 아직 미전환 창구, 정적 자원, 로그인)는 열어 둠
-                .anyRequest().permitAll()
+                // 나머지 API 전부 로그인 필수 (객체 단위 권한은 서비스/정책 계층에서)
+                .requestMatchers("/api/**").authenticated()
+                // API도 정적 자원도 아닌 나머지는 전부 거부
+                .anyRequest().denyAll()
             )
+            // 07/20: CSRF 비활성화.
+            //   본 모듈(RD-SRS-9.x 문서 형상관리)은 클라이언트 에이전트가 호출하는 백엔드
+            //   API로, 브라우저 쿠키 자동전송에 기인하는 CSRF는 이 사용 형태에 해당하지 않는다.
+            //   또한 CSRF는 9.x 명세 조항에 없다. (에이전트↔서버 통신 보호는 상위 명세의
+            //   "암호화 채널 + 인증" 요구에 따라 배포 단계에서 TLS/토큰으로 처리 예정.)
+            //   로그인·사용자 식별·객체 인가(소유자/이해관계자 검사)는 9.x 기능 동작에
+            //   필요하므로 그대로 유지한다.
             .csrf(csrf -> csrf.disable())
             // 미인증으로 보호된 창구 호출 시: 로그인 페이지 리다이렉트가 아니라 401 JSON
             .exceptionHandling(ex -> ex
@@ -69,7 +75,7 @@ public class SecurityConfig {
                     writeJson(res, 401, Map.of("ok", false, "error", "로그인이 필요합니다.")))
                 // 인증 3단계(3-C): 로그인은 됐지만 권한이 없는 경우 — 403 JSON
                 .accessDeniedHandler((req, res, e) ->
-                    writeJson(res, 403, Map.of("ok", false, "error", "관리자(ADMIN)만 사용할 수 있는 기능입니다."))))
+                    writeJson(res, 403, Map.of("ok", false, "error", "이 작업을 수행할 권한이 없습니다."))))
             // 세션 기반 폼 로그인. 로그인 처리 창구를 /api/auth/login으로.
             .formLogin(form -> form
                 .loginProcessingUrl("/api/auth/login")
