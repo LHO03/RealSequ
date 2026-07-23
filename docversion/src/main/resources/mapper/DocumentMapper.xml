@@ -17,7 +17,8 @@
          FOR UPDATE는 @Transactional 안에서만 lock 유효 (C++ TransactionGuard 대응). -->
     <select id="findLivePointerForUpdate" resultType="map">
         SELECT current_version_id AS currentVersionId,
-               current_revision_no AS currentRevisionNo
+               current_revision_no AS currentRevisionNo,
+               status AS status
         FROM documents
         WHERE file_id = #{fileId}
         FOR UPDATE
@@ -53,6 +54,12 @@
     <!-- 07/12 - RD-SRS-9.5 열람: 현재 경로 (다운로드 파일명 산출용) -->
     <select id="findCurrentPath" resultType="string">
         SELECT current_path FROM documents
+        WHERE file_id = #{fileId} AND deleted_at IS NULL
+    </select>
+
+    <!-- V11: 현재 최신 버전 ID (승인 대상 버전 귀속·확정 직전 재확인용). soft delete 제외. -->
+    <select id="findCurrentVersionId" resultType="string">
+        SELECT current_version_id FROM documents
         WHERE file_id = #{fileId} AND deleted_at IS NULL
     </select>
 

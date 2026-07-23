@@ -47,7 +47,7 @@ public class DocumentLifecycleService {
     public StatusView getStatus(String fileId) {
         String s = mapper.findStatus(fileId);
         if (s == null) {
-            throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);
+            throw new ResourceNotFoundException("문서를 찾을 수 없습니다: " + fileId);
         }
         return view(DocumentStatus.of(s));
     }
@@ -62,7 +62,7 @@ public class DocumentLifecycleService {
     public StatusView getStatusForUpdate(String fileId) {
         String s = mapper.findStatusForUpdate(fileId);
         if (s == null) {
-            throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);
+            throw new ResourceNotFoundException("문서를 찾을 수 없습니다: " + fileId);
         }
         return view(DocumentStatus.of(s));
     }
@@ -81,10 +81,18 @@ public class DocumentLifecycleService {
         getStatusForUpdate(fileId);
         String owner = documents.findOwner(fileId);
         if (owner == null) {
-            throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);
+            throw new ResourceNotFoundException("문서를 찾을 수 없습니다: " + fileId);
         }
         if (!owner.equals(userId)) {
             throw new ForbiddenOperationException("문서 소유자만 상태를 변경할 수 있습니다.");
+        }
+        // V11 클러스터 1(P0-2): "승인" 상태는 수동 경로로 진입할 수 없다. 승인은 반드시
+        //   승인 워크플로(지정 승인자들의 실제 판정)를 통해서만 도달해야 한다. 이 차단이 없으면
+        //   소유자가 요청도 없이 UNDER_REVIEW → APPROVED로 직접 바꿔 자기 문서를 자가 승인할 수 있다.
+        //   (승인 로직은 changeStatusAsWorkflow를 쓰므로 이 차단에 걸리지 않는다.)
+        if (DocumentStatus.of(targetStatus) == DocumentStatus.APPROVED) {
+            throw new ForbiddenOperationException(
+                    "승인 상태는 승인 워크플로를 통해서만 도달할 수 있습니다. 상태를 직접 '승인'으로 바꿀 수 없습니다.");
         }
         // 07/12 - C-2: 열린 승인 요청이 있는 동안 수동 상태 변경을 차단한다.
         //   허용하면 예: UNDER_REVIEW→DRAFT 수동 전환 후, 열린 요청의 승인 확정(DRAFT→APPROVED 불허)·
@@ -92,7 +100,7 @@ public class DocumentLifecycleService {
         //   open_marker UNIQUE 때문에 새 요청 생성도 불가능한 교착이 된다.
         //   워크플로 경로(changeStatusAsWorkflow)는 승인 로직이 요청을 닫은 "뒤"에 호출하므로 검사하지 않는다.
         if (approvals.findOpenByFile(fileId) != null) {
-            throw new IllegalStateException(
+            throw new WorkflowConflictException(
                     "처리 대기 중인 승인 요청이 있어 상태를 직접 변경할 수 없습니다. 먼저 승인 요청을 취소하거나 결재를 완료하십시오.");
         }
         return changeStatusAsWorkflow(fileId, userId, targetStatus, reason);
@@ -107,16 +115,16 @@ public class DocumentLifecycleService {
         // 07/12 - C-1: 잠금 조회로 전환 — 전이 검사와 updateStatus 사이의 경합 차단.
         String s = mapper.findStatusForUpdate(fileId);
         if (s == null) {
-            throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);
+            throw new ResourceNotFoundException("문서를 찾을 수 없습니다: " + fileId);
         }
         DocumentStatus current = DocumentStatus.of(s);
         DocumentStatus target = DocumentStatus.of(targetStatus);
 
         if (current == target) {
-            throw new IllegalStateException("이미 '" + current.label() + "' 상태입니다.");
+            throw new WorkflowConflictException("이미 '" + current.label() + "' 상태입니다.");
         }
         if (!current.canTransitionTo(target)) {
-            throw new IllegalStateException(
+            throw new WorkflowConflictException(
                     "'" + current.label() + "' \u2192 '" + target.label() + "' 전이는 허용되지 않습니다.");
         }
 
@@ -138,6 +146,11 @@ public class DocumentLifecycleService {
     private StatusView view(DocumentStatus current) {
         List<StatusOption> opts = new ArrayList<>();
         for (DocumentStatus t : current.allowedTargets()) {
+            // V11 클러스터 1(P0-2): APPROVED는 수동 전이 대상이 아니므로 UI 후보에서 제외한다.
+            //   (전이표 자체는 승인 워크플로가 쓰므로 유지하되, 화면에 "직접 승인" 버튼은 노출하지 않는다.)
+            if (t == DocumentStatus.APPROVED) {
+                continue;
+            }
             opts.add(new StatusOption(t.name(), t.label()));
         }
         return new StatusView(current.name(), current.label(), opts);

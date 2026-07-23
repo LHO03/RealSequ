@@ -31,7 +31,9 @@ public interface DocumentMapper {
     /**
      * 라이브 포인터 조회 + row lock (onDocumentModified).
      * SELECT ... FOR UPDATE — 트랜잭션 안에서만 lock 유효.
-     * 반환: {current_version_id, current_revision_no} 또는 null(문서 없음).
+     * 반환: {currentVersionId, currentRevisionNo, status} 또는 null(문서 없음).
+     * <p>status는 V11 정책 A에서 사용: 잠긴 같은 행에서 상태를 함께 읽어, APPROVED 문서에
+     * 새 버전이 올라오면 같은 트랜잭션에서 REVISION_DRAFT로 되돌리기 위함(추가 잠금 불필요).
      */
     Map<String, Object> findLivePointerForUpdate(@Param("fileId") String fileId);
 
@@ -46,6 +48,13 @@ public interface DocumentMapper {
      * 문서 소유자 조회 (인증 3단계: 소유권 검사용). soft delete 제외. 없으면 null.
      */
     String findOwner(@Param("fileId") String fileId);
+
+    /**
+     * 현재 최신 버전 ID 조회 (V11 - 승인 대상 버전 귀속용). soft delete 제외. 없으면 null.
+     * <p>승인 요청 생성 시 이 값을 target_version_id로 고정하고, 승인 확정 직전 재확인한다.
+     * 호출 전 documents 행을 잠갔다면(getStatusForUpdate 등) 이 읽기는 일관 스냅샷을 본다.
+     */
+    String findCurrentVersionId(@Param("fileId") String fileId);
 
     /**
      * 라이브 포인터 갱신 (onDocumentModified): current_version_id/revision_no/updated_at.

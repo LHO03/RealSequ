@@ -1,7 +1,0 @@
-target/
-*.iml
-.idea/
-.vscode/
-storage/
-*.log
-.git/

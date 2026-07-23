@@ -31,6 +31,11 @@
         SELECT storage_key FROM files_versions WHERE version_id = #{versionId} LIMIT 1
     </select>
 
+    <!-- P1: 이전 버전 MIME 조회 (VersionUpdated의 fromMimeType 정확 전달용). -->
+    <select id="selectMimetype" resultType="string">
+        SELECT mimetype FROM files_versions WHERE version_id = #{versionId} LIMIT 1
+    </select>
+
     <!-- getVersionsAtTime 1차: targetTimestamp 이하, 최신순, 페이지네이션.
          `timestamp`는 예약어 → 백틱. -->
     <select id="findAtOrBeforeTimestamp" resultMap="versionInfoMap">
@@ -38,7 +43,7 @@
                size, mimetype, storage_key, metadata
         FROM files_versions
         WHERE file_id = #{fileId} AND `timestamp` &lt;= #{targetTimestamp}
-        ORDER BY `timestamp` DESC
+        ORDER BY `timestamp` DESC, revision_no DESC
         LIMIT #{limit} OFFSET #{offset}
     </select>
 
@@ -48,7 +53,7 @@
                size, mimetype, storage_key, metadata
         FROM files_versions
         WHERE file_id = #{fileId} AND `timestamp` &gt; #{targetTimestamp}
-        ORDER BY `timestamp` ASC
+        ORDER BY `timestamp` ASC, revision_no ASC
         LIMIT 1
     </select>
 

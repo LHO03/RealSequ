@@ -11,7 +11,9 @@ import java.util.Map;
 
 /**
  * 알림 통신 창구 (RD-SRS-9.9).
- * 인증 2-E: "내 알림"(조회·읽음)과 구독(이 문서를 내가 구독)은 로그인 사용자 기준으로 동작한다.
+ * 인증 2-E: "내 알림"(조회·읽음)과 구독은 로그인 사용자 기준으로 동작한다.
+ * <p>P1: 예외→HTTP 매핑은 GlobalExceptionHandler로 일원화(없음→404, 권한 없음→403).
+ * (read의 404는 예외가 아니라 "이미 읽음/없음" 반환값 기반 조건이므로 여기서 직접 처리한다.)
  */
 @RestController
 @RequestMapping("/api")
@@ -47,24 +49,16 @@ public class NotificationController {
         return Map.of("ok", true, "unread", service.unreadCount(userId));
     }
 
-    /** 아웃박스 상태(시연용: PENDING/SENT/DLQ 확인). (읽기 — 3단계에서 ADMIN 전용 예정) */
+    /** 아웃박스 상태(시연용). (읽기 — ADMIN 전용, SecurityConfig) */
     @GetMapping("/notifications/outbox")
     public List<Map<String, Object>> outbox(@RequestParam(defaultValue = "50") int limit) {
         return service.outbox(limit);
     }
 
-    /** 이 문서를 구독. 07/19 - P1-①: 소유자만 가능 (자기 구독을 통한 열람 인가 우회 차단). */
+    /** 이 문서를 구독. 07/19 - P1-①: 소유자만 가능. */
     @PostMapping("/documents/{fileId}/subscribe")
     public Map<String, Object> subscribe(Principal principal, @PathVariable String fileId) {
-        try {
-            service.subscribeChecked(fileId, principal.getName());
-        } catch (com.docversion.service.ForbiddenOperationException e) {
-            throw new org.springframework.web.server.ResponseStatusException(
-                    org.springframework.http.HttpStatus.FORBIDDEN, e.getMessage());
-        } catch (IllegalArgumentException e) {
-            throw new org.springframework.web.server.ResponseStatusException(
-                    org.springframework.http.HttpStatus.NOT_FOUND, e.getMessage());
-        }
+        service.subscribeChecked(fileId, principal.getName());
         return Map.of("subscribers", service.subscribers(fileId));
     }
 
@@ -78,15 +72,7 @@ public class NotificationController {
     /** 파일 구독자 목록. 07/19 - P1-②: 이해관계자만. */
     @GetMapping("/documents/{fileId}/subscribers")
     public List<String> subscribers(Principal principal, @PathVariable String fileId) {
-        try {
-            access.requireRead(fileId, principal.getName());
-        } catch (com.docversion.service.ForbiddenOperationException e) {
-            throw new org.springframework.web.server.ResponseStatusException(
-                    org.springframework.http.HttpStatus.FORBIDDEN, e.getMessage());
-        } catch (IllegalArgumentException e) {
-            throw new org.springframework.web.server.ResponseStatusException(
-                    org.springframework.http.HttpStatus.NOT_FOUND, e.getMessage());
-        }
+        access.requireRead(fileId, principal.getName());
         return service.subscribers(fileId);
     }
 }

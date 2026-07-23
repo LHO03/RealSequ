@@ -13,6 +13,9 @@ import org.testcontainers.containers.MariaDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -36,12 +39,30 @@ class VersionLifecycleParityTest {
             .withUsername("nextcloud")
             .withPassword("nextcloud");
 
+    /**
+     * 07/23: 버전 콘텐츠 저장용 임시 경로.
+     * <p>{@code @DynamicPropertySource} 메서드는 {@link DynamicPropertyRegistry} 인자를
+     * <b>하나만</b> 받을 수 있다. 과거엔 {@code @TempDir Path} 파라미터를 함께 받아
+     * 컨텍스트 부트스트랩 단계에서 IllegalStateException으로 전 테스트가 기동조차 못 했다.
+     */
+    static final Path STORAGE_DIR = createTempStorage();
+
+    private static Path createTempStorage() {
+        try {
+            return Files.createTempDirectory("docversion-test-");
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     @DynamicPropertySource
-    static void props(DynamicPropertyRegistry registry, @org.junit.jupiter.api.io.TempDir Path tmp) {
+    static void props(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", mariadb::getJdbcUrl);
         registry.add("spring.datasource.username", mariadb::getUsername);
         registry.add("spring.datasource.password", mariadb::getPassword);
-        registry.add("docversion.storage.base-path", () -> tmp.resolve("storage").toString());
+        registry.add("docversion.storage.base-path", () -> STORAGE_DIR.toString());
+        // P1c: 스케줄 diff 워커가 테스트 도중 끼어들지 않도록 첫 실행을 1시간 뒤로 미룬다(수동 runOnce만 검증).
+        registry.add("docversion.diff.worker.initial-delay-ms", () -> "3600000");
     }
 
     @Autowired
@@ -49,6 +70,9 @@ class VersionLifecycleParityTest {
 
     @Autowired
     VersionDiffMapper versionDiffMapper;
+
+    @Autowired
+    com.docversion.diff.DiffJobWorker diffWorker;
 
     @Test
     void createThenModify_assignsMonotonicRevisions_andCachesDiff() {
@@ -69,10 +93,18 @@ class VersionLifecycleParityTest {
         assertThat(v2.getRevisionNo()).isEqualTo(2);
         assertThat(v2.getVersionId()).isNotEqualTo(v1.getVersionId());
 
-        // 3. diff 캐시가 (v1 -> v2)로 적재되었는지 (AFTER_COMMIT 리스너, INSERT IGNORE)
-        Map<String, Object> cached = versionDiffMapper.findCached(
+        // 3. P1c: 수정 직후 diff는 PENDING으로 적재되고(비동기), 워커가 계산해 COMPLETED로 전이한다.
+        Map<String, Object> pending = versionDiffMapper.findByPair(
                 v1.getFileId(), v1.getVersionId(), v2.getVersionId());
-        assertThat(cached).isNotNull();
+        assertThat(pending).isNotNull();
+        assertThat(pending.get("status")).isEqualTo("PENDING");
+
+        int handled = diffWorker.runOnce(10);
+        assertThat(handled).isEqualTo(1);
+
+        Map<String, Object> cached = versionDiffMapper.findByPair(
+                v1.getFileId(), v1.getVersionId(), v2.getVersionId());
+        assertThat(cached.get("status")).isEqualTo("COMPLETED");
         assertThat(cached.get("diffMethod")).isEqualTo("myers");
         // line2 수정(1 add + 1 del) + line4 추가(1 add) → added=2, deleted=1
         assertThat(((Number) cached.get("addedLines")).intValue()).isEqualTo(2);
@@ -90,12 +122,12 @@ class VersionLifecycleParityTest {
 
     @Test
     void modifyMissingDocument_throwsNotFound() {
-        // 07/12 - C-3: 인증 3-A(소유권 검사) 도입 이후, 없는 문서 수정은
-        //   "빈 결과"가 아니라 IllegalArgumentException(컨트롤러에서 404)이다.
+        // 07/12 - C-3 + P1: 없는 문서 수정은 ResourceNotFoundException(컨트롤러 어드바이스에서 404).
+        //   (ResourceNotFoundException은 RuntimeException 계열 — 예전 IllegalArgumentException에서 분리됨.)
         assertThatThrownBy(() -> service.onDocumentModified(
                 "bob", "non-existent-file-id",
                 FileContent.ofText("x", "text/plain")))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(com.docversion.service.ResourceNotFoundException.class)
                 .hasMessageContaining("문서를 찾을 수 없습니다");
     }
 }

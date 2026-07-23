@@ -97,7 +97,7 @@ public class NotificationService {
     public void subscribeChecked(String fileId, String userId) {
         String owner = documents.findOwner(fileId);
         if (owner == null) {
-            throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);
+            throw new ResourceNotFoundException("문서를 찾을 수 없습니다: " + fileId);
         }
         if (!owner.equals(userId)) {
             throw new ForbiddenOperationException(

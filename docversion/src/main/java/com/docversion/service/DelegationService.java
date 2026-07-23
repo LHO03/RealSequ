@@ -47,21 +47,21 @@ public class DelegationService {
     @Transactional
     public Map<String, Object> delegate(String delegatorId, String delegateId, int days) {
         if (delegateId == null || delegateId.isBlank()) {
-            throw new IllegalArgumentException("대리인을 지정해야 합니다.");
+            throw new InvalidRequestException("대리인을 지정해야 합니다.");
         }
         String delegate = delegateId.trim();
         if (delegate.equals(delegatorId)) {
-            throw new IllegalStateException("자기 자신에게는 위임할 수 없습니다.");
+            throw new InvalidRequestException("자기 자신에게는 위임할 수 없습니다.");
         }
         if (days < 1 || days > 365) {
-            throw new IllegalArgumentException("위임 기간은 1~365일이어야 합니다.");
+            throw new InvalidRequestException("위임 기간은 1~365일이어야 합니다.");
         }
         long now = Instant.now().getEpochSecond();
         long ends = now + (long) days * 86400;
         try {
             mapper.insertDelegation(delegatorId, delegate, now, ends, now);
         } catch (DuplicateKeyException e) {
-            throw new IllegalStateException("이미 활성 위임이 있습니다. 기존 위임을 해지한 뒤 다시 설정하세요.");
+            throw new WorkflowConflictException("이미 활성 위임이 있습니다. 기존 위임을 해지한 뒤 다시 설정하세요.");
         }
         return state(delegatorId);
     }
@@ -71,7 +71,7 @@ public class DelegationService {
     public Map<String, Object> revoke(String delegatorId) {
         int n = mapper.revoke(delegatorId, Instant.now().getEpochSecond());
         if (n == 0) {
-            throw new IllegalStateException("해지할 활성 위임이 없습니다.");
+            throw new WorkflowConflictException("해지할 활성 위임이 없습니다.");
         }
         return state(delegatorId);
     }

@@ -74,7 +74,7 @@ public class ApprovalService {
                                  List<String> approverIds, String mode, String comment) {
         String owner = documents.findOwner(fileId);
         if (owner == null) {
-            throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);
+            throw new ResourceNotFoundException("문서를 찾을 수 없습니다: " + fileId);
         }
         if (!owner.equals(requesterId)) {
             throw new ForbiddenOperationException("문서 소유자만 승인을 요청할 수 있습니다.");
@@ -90,16 +90,16 @@ public class ApprovalService {
             }
         }
         if (cleaned.isEmpty()) {
-            throw new IllegalArgumentException("승인자를 1명 이상 지정해야 합니다.");
+            throw new InvalidRequestException("승인자를 1명 이상 지정해야 합니다.");
         }
         if (cleaned.contains(requesterId)) {
-            throw new IllegalStateException("자기 자신을 승인자로 지정할 수 없습니다. (자기 승인 금지)");
+            throw new WorkflowConflictException("자기 자신을 승인자로 지정할 수 없습니다. (자기 승인 금지)");
         }
 
         // 판정 방식 검증 (4-A: 전원/과반, 4-B: 순차)
         String m = mode == null ? "ALL" : mode.trim().toUpperCase();
         if (!m.equals("ALL") && !m.equals("MAJORITY") && !m.equals("SEQUENTIAL")) {
-            throw new IllegalArgumentException("판정 방식은 ALL(전원), MAJORITY(과반), SEQUENTIAL(순차) 중 하나여야 합니다.");
+            throw new InvalidRequestException("판정 방식은 ALL(전원), MAJORITY(과반), SEQUENTIAL(순차) 중 하나여야 합니다.");
         }
 
         // 검토중 상태에서만 요청 가능
@@ -107,19 +107,27 @@ public class ApprovalService {
         //   "검사 시점엔 검토중이었는데 커밋 시점엔 초안"인 TOCTOU 경합을 차단한다.
         String status = lifecycle.getStatusForUpdate(fileId).status();
         if (!"UNDER_REVIEW".equals(status)) {
-            throw new IllegalStateException("검토중 상태에서만 승인 요청을 생성할 수 있습니다. (먼저 문서를 검토 제출하십시오.)");
+            throw new WorkflowConflictException("검토중 상태에서만 승인 요청을 생성할 수 있습니다. (먼저 문서를 검토 제출하십시오.)");
         }
         if (mapper.findOpenByFile(fileId) != null) {
-            throw new IllegalStateException("이미 처리 대기 중인 승인 요청이 있습니다.");
+            throw new WorkflowConflictException("이미 처리 대기 중인 승인 요청이 있습니다.");
+        }
+
+        // V11 클러스터 1(P0-1): 요청 생성 시점의 현재 버전을 승인 대상으로 고정한다.
+        //   위 getStatusForUpdate가 documents 행을 잠갔으므로 이 읽기는 일관 스냅샷을 본다.
+        //   이후 정책 A(열린 요청 동안 업로드 차단)로 이 버전은 확정까지 바뀌지 않는다.
+        String targetVersionId = documents.findCurrentVersionId(fileId);
+        if (targetVersionId == null || targetVersionId.isBlank()) {
+            throw new WorkflowConflictException("현재 버전이 없어 승인 요청을 만들 수 없습니다.");
         }
 
         long now = Instant.now().getEpochSecond();
         String id = uuid.newId();
         try {
-            mapper.insertRequest(id, fileId, requesterId, m, now);
+            mapper.insertRequest(id, fileId, requesterId, m, targetVersionId, now);
         } catch (DuplicateKeyException e) {
             // 동시 요청 경합 시 DB의 uq_open_per_file이 두 번째를 차단
-            throw new IllegalStateException("이미 처리 대기 중인 승인 요청이 있습니다.");
+            throw new WorkflowConflictException("이미 처리 대기 중인 승인 요청이 있습니다.");
         }
         int seq = 1;
         for (String a : cleaned) {
@@ -167,7 +175,7 @@ public class ApprovalService {
         lifecycle.getStatusForUpdate(fileId);
         Map<String, Object> open = mapper.findOpenByFileForUpdate(fileId);
         if (open == null) {
-            throw new IllegalStateException("처리할 승인 요청이 없습니다.");
+            throw new WorkflowConflictException("처리할 승인 요청이 없습니다.");
         }
         String id = String.valueOf(open.get("id"));
         String modeVal = String.valueOf(open.get("mode"));
@@ -190,19 +198,19 @@ public class ApprovalService {
                     .filter(a -> "PENDING".equals(a.get("decision")))
                     .findFirst().orElse(null); // seq 오름차순 — 여러 명 대리 시 앞 순번 우선
             if (viaDelegation == null) {
-                throw new IllegalStateException("지정된 승인자(또는 그의 대리인)만 처리할 수 있습니다. (승인자: "
+                throw new WorkflowConflictException("지정된 승인자(또는 그의 대리인)만 처리할 수 있습니다. (승인자: "
                         + joinApprovers(approvers) + ")");
             }
             // 대리 경유 자기 승인 금지: 요청자가 대리인이 되어 자기 요청을 판정하는 우회 차단
             String requester = String.valueOf(open.get("requesterId"));
             if (actorId.equals(requester)) {
-                throw new IllegalStateException("요청자는 대리인 자격으로도 판정할 수 없습니다. (자기 승인 금지)");
+                throw new WorkflowConflictException("요청자는 대리인 자격으로도 판정할 수 없습니다. (자기 승인 금지)");
             }
             mine = viaDelegation;
             effectiveApprover = String.valueOf(viaDelegation.get("approverId"));
         }
         if (!"PENDING".equals(mine.get("decision"))) {
-            throw new IllegalStateException("이미 판정을 완료하셨습니다. (판정은 1회)");
+            throw new WorkflowConflictException("이미 판정을 완료하셨습니다. (판정은 1회)");
         }
         // 4-B 순차(SEQUENTIAL): 결재선 — 앞 순번이 모두 승인해야 내 차례가 온다.
         // (대리 판정도 원 승인자의 차례를 그대로 따른다)
@@ -212,7 +220,7 @@ public class ApprovalService {
                     .filter(a -> "PENDING".equals(a.get("decision")))
                     .findFirst().orElse(null); // seq 오름차순 정렬이므로 첫 PENDING = 현재 차례
             if (current != null && !eff.equals(String.valueOf(current.get("approverId")))) {
-                throw new IllegalStateException("순차 결재: 지금은 " + current.get("seq") + "번("
+                throw new WorkflowConflictException("순차 결재: 지금은 " + current.get("seq") + "번("
                         + current.get("approverId") + ") 차례입니다. 앞 순번의 판정을 기다려 주세요.");
             }
         }
@@ -222,7 +230,7 @@ public class ApprovalService {
         int updated = mapper.decideApprover(id, effectiveApprover,
                 approved ? "APPROVED" : "REJECTED", now, c, actorId);
         if (updated == 0) {
-            throw new IllegalStateException("이미 판정을 완료하셨습니다. (판정은 1회)");
+            throw new WorkflowConflictException("이미 판정을 완료하셨습니다. (판정은 1회)");
         }
         String actorLabel = actorId.equals(effectiveApprover)
                 ? actorId : effectiveApprover + " (대리: " + actorId + ")";
@@ -254,10 +262,31 @@ public class ApprovalService {
             return getState(fileId);
         }
 
+        // V11 클러스터 1(P0-1) 이중 방어: 승인 확정 직전, 승인 대상 버전이 여전히 현재 버전인지 확인.
+        //   정책 A 하에선 열린 요청 동안 업로드가 막혀 정상 경로로는 불일치가 없지만, 수동 경로·경합·
+        //   데이터 이상에 대비한 방어선이다. 불일치면 승인하지 않고 요청을 STALE로 종료한다.
+        //   (반려 확정은 문서를 어차피 DRAFT로 되돌리므로 버전 불일치가 무해 — 승인 확정만 가드한다.)
+        if (finalApproved) {
+            String targetVersionId = str(open.get("targetVersionId"));
+            String currentVersionId = documents.findCurrentVersionId(fileId);
+            if (targetVersionId != null && !targetVersionId.equals(currentVersionId)) {
+                int staled = mapper.closeRequest(id, "STALE", now);
+                if (staled == 0) {
+                    throw new WorkflowConflictException("이미 처리된 요청입니다.");
+                }
+                mapper.insertActivity(id, actorId, "STALE",
+                        "승인 대상 버전이 변경되어 요청을 무효화했습니다. (대상 " + targetVersionId
+                                + " / 현재 " + currentVersionId + ")", now);
+                notifications.notifyStakeholders(fileId, "요청 무효화",
+                        "문서가 변경되어 승인 요청이 무효화되었습니다. 최신 버전으로 다시 요청해 주십시오.", actorId);
+                return getState(fileId);
+            }
+        }
+
         // 확정: 요청 닫기 + 최종 이력 + 상태 전이 + 결과 알림
         int closed = mapper.closeRequest(id, finalApproved ? "APPROVED" : "REJECTED", now);
         if (closed == 0) {
-            throw new IllegalStateException("이미 처리된 요청입니다.");
+            throw new WorkflowConflictException("이미 처리된 요청입니다.");
         }
         String summary = "최종 " + (finalApproved ? "승인" : "반려")
                 + " (방식 " + modeLabel(modeVal) + ", 승인 " + ok + "/" + n + ")";
@@ -308,7 +337,7 @@ public class ApprovalService {
         lifecycle.getStatusForUpdate(fileId);
         Map<String, Object> open = mapper.findOpenByFileForUpdate(fileId);
         if (open == null) {
-            throw new IllegalStateException("번복할 수 있는 열린 요청이 없습니다. (확정된 판정은 번복 불가 — 새 승인 요청으로 정정하세요)");
+            throw new WorkflowConflictException("번복할 수 있는 열린 요청이 없습니다. (확정된 판정은 번복 불가 — 새 승인 요청으로 정정하세요)");
         }
         String id = String.valueOf(open.get("id"));
         List<Map<String, Object>> approvers = mapper.listApprovers(id);
@@ -320,7 +349,7 @@ public class ApprovalService {
                         || actorId.equals(String.valueOf(a.get("actedBy"))))
                 .findFirst().orElse(null);
         if (target == null) {
-            throw new IllegalStateException("번복할 내 판정이 없습니다.");
+            throw new WorkflowConflictException("번복할 내 판정이 없습니다.");
         }
         String effectiveApprover = String.valueOf(target.get("approverId"));
 
@@ -331,14 +360,14 @@ public class ApprovalService {
                     .anyMatch(a -> ((Number) a.get("seq")).intValue() > mySeq
                             && !"PENDING".equals(a.get("decision")));
             if (laterDecided) {
-                throw new IllegalStateException("뒤 순번이 이미 판정하여 번복할 수 없습니다. (결재선 무결성)");
+                throw new WorkflowConflictException("뒤 순번이 이미 판정하여 번복할 수 없습니다. (결재선 무결성)");
             }
         }
 
         int n = mapper.retractApprover(id, effectiveApprover);
         if (n == 0) {
             // OPEN 검사와 UPDATE 사이에 다른 판정으로 확정된 경합
-            throw new IllegalStateException("요청이 방금 확정되어 번복할 수 없습니다.");
+            throw new WorkflowConflictException("요청이 방금 확정되어 번복할 수 없습니다.");
         }
         long now = Instant.now().getEpochSecond();
         String c = blankToNull(comment);
@@ -358,11 +387,11 @@ public class ApprovalService {
         lifecycle.getStatusForUpdate(fileId);
         Map<String, Object> open = mapper.findOpenByFileForUpdate(fileId);
         if (open == null) {
-            throw new IllegalStateException("취소할 승인 요청이 없습니다.");
+            throw new WorkflowConflictException("취소할 승인 요청이 없습니다.");
         }
         String requester = String.valueOf(open.get("requesterId"));
         if (!requester.equals(actorId)) {
-            throw new IllegalStateException("요청자(" + requester + ")만 취소할 수 있습니다.");
+            throw new WorkflowConflictException("요청자(" + requester + ")만 취소할 수 있습니다.");
         }
         String id = String.valueOf(open.get("id"));
         long now = Instant.now().getEpochSecond();
@@ -370,7 +399,7 @@ public class ApprovalService {
 
         int closed = mapper.closeRequest(id, "CANCELLED", now);
         if (closed == 0) {
-            throw new IllegalStateException("이미 처리된 요청입니다.");
+            throw new WorkflowConflictException("이미 처리된 요청입니다.");
         }
         // 이미 이뤄진 개인 판정 기록은 CANCELLED 요청 아래 그대로 보존(감사 추적)
         mapper.insertActivity(id, actorId, "CANCELLED", c, now);
@@ -384,6 +413,11 @@ public class ApprovalService {
 
     private static String blankToNull(String s) {
         return (s == null || s.isBlank()) ? null : s.trim();
+    }
+
+    /** Map에서 꺼낸 값을 문자열로 — null은 "null"이 아니라 진짜 null로 보존(버전 비교용). */
+    private static String str(Object o) {
+        return o == null ? null : String.valueOf(o);
     }
 
     private static String modeLabel(String m) {

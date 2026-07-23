@@ -1,9 +1,11 @@
-# ============================================================
+﻿# ============================================================
 # docversion improvements verification script (07/12)
 # Usage: with the server running (docker compose up), in a new PowerShell terminal:
 #   powershell -ExecutionPolicy Bypass -File .\docversion_test.ps1
 # Checks: health / C-2 deadlock guard / C-1 concurrent decide / C-3 (404) / I-2 access control
 #         / 9.5 version content / 9.3 reason+activity / regression / I-1 path race / I-4 stale reclaim
+#         / P1b 400-404 exception split / P1c diff state machine + retry / P1a mime smoke
+# NOTE: sections 13-14 poll the async diff worker and may take ~1-2 min (worker fixedDelay).
 # ============================================================
 
 $ErrorActionPreference = "Continue"
@@ -210,14 +212,14 @@ try { $o1 = ((Receive-Job $jr1) -join "`n") | ConvertFrom-Json } catch {}
 try { $o2 = ((Receive-Job $jr2) -join "`n") | ConvertFrom-Json } catch {}
 Remove-Job $jr1,$jr2 -Force
 $sameDoc = ($o1.fileId) -and ($o1.fileId -eq $o2.fileId)
-# I-1 core guarantee: parallel uploads must NOT create duplicate docs -> merged into one (sameDoc).
-# Version count depends on arrival gap: if the loser falls back to "add version" -> 2;
-# if both are effectively simultaneous before a winner is fixed -> 1 (normal race window).
-# So assert: sameDoc AND at least 1 version (doc created and listable).
-$versArr = @()
-try { $versArr = @(Json @("-b", $A, "$Base/api/documents/" + $o1.fileId + "/versions")) } catch {}
-$vCount = $versArr.Count
-Check "10-1 I-1: parallel create -> one doc (no duplicate)" ($sameDoc -and ($vCount -ge 1)) ("fileIds: " + $o1.fileId + " / " + $o2.fileId + ", versions: " + $vCount)
+$versUrl = "$Base/api/documents/" + $o1.fileId + "/versions"
+$versRaw  = Body @("-b", $A, $versUrl)
+$versCode = Code @("-b", $A, $versUrl)
+$versR = $null
+try { $versR = $versRaw | ConvertFrom-Json } catch {}
+$versN = if ($null -eq $versR) { 0 } else { @($versR).Count }
+Check "10-1 I-1: parallel create -> one doc, revisions 1..2" ($sameDoc -and ($versN -eq 2)) `
+    ("fileIds: " + $o1.fileId + " / " + $o2.fileId + " | count: " + $versN + " | http: " + $versCode + " | body: " + $versRaw)
 
 # 10-2 I-4: plant a stale PROCESSING row directly in DB, wait one worker cycle,
 #   status must leave PROCESSING (reclaimed -> resent -> SENT for WEB channel).
@@ -278,6 +280,95 @@ $verBody = Body @("-b", $A, "$Base/api/documents/$FP/versions")
 Check "11-5 storageKey not exposed in versions" (-not ($verBody -match "storageKey")) ("leak: " + ($verBody -match "storageKey"))
 
 
+Write-Host "`n===== 12. P1b: 400/404 exception separation =====" -ForegroundColor Cyan
+# fresh DRAFT doc owned by alice. In request(), input validation runs BEFORE the status check,
+# so a DRAFT doc still surfaces 400 for bad input (previously these returned 404).
+$docE = NewFile "exc.txt" "v1"
+$FE = (Upload $A ("t"+$Run) $docE $null).fileId
+
+Check "12-1 invalid approval mode = 400" `
+    ((Code @("-b", $A, "-d", "approvers=bob&mode=BOGUS", "$Base/api/documents/$FE/approval/request")) -eq "400") `
+    "pre-fix defect returns 404"
+Check "12-2 empty approvers = 400" `
+    ((Code @("-b", $A, "-d", "approvers=&mode=ALL", "$Base/api/documents/$FE/approval/request")) -eq "400")
+Check "12-3 unknown target status = 400" `
+    ((SetStatus $A $FE "NONSENSE") -eq "400") "pre-fix defect returns 404"
+Check "12-4 approval on missing doc = 404" `
+    ((Code @("-b", $A, "-d", "approvers=bob&mode=ALL", "$Base/api/documents/no-such-doc/approval/request")) -eq "404")
+Check "12-5 status on missing doc = 404 (not 403)" `
+    ((Code @("-b", $A, "$Base/api/documents/no-such-doc/status")) -eq "404")
+Check "12-6 retention bad scope = 400 (admin)" `
+    ((Code @("-b", $AD, "-d", "scopeType=BOGUS", "$Base/api/retention/policies")) -eq "400")
+
+Write-Host "`n===== 13. P1c: diff state machine + retry =====" -ForegroundColor Cyan
+$docD = NewFile "diff1.txt" "alpha`nbeta`ngamma`n"
+$uD  = Upload $A ("t"+$Run) $docD $null
+$FD  = $uD.fileId
+$vD1 = $uD.version.versionId
+# modify -> new version. Take the new versionId straight from the response: relying on the
+# versions-list order was fragile (v1/v2 share the same epoch-second, so ties need a tiebreaker).
+$docD2 = NewFile "diff1_v2.txt" "alpha`nBETA`ngamma`ndelta`n"
+$mD  = Json @("-b", $A, "-F", "file=@$docD2", "$Base/api/documents/$FD/versions")
+$vD2 = $mD.versionId
+Check "13-0a modify created a distinct new version" `
+    ((-not [string]::IsNullOrEmpty($vD2)) -and ($vD2 -ne $vD1)) ("v1: $vD1 / v2: $vD2")
+# ordering regression: list must be newest-first even when both rows share the same second
+# (FilesVersionMapper ORDER BY timestamp DESC, revision_no DESC)
+$vlistD = Json @("-b", $A, "$Base/api/documents/$FD/versions")
+Check "13-0b versions list newest-first (same-second tiebreak)" `
+    ($vlistD[0].versionId -eq $vD2) ("[0] revisionNo: " + $vlistD[0].revisionNo)
+
+# 13-1 diff query returns a body with a status field (200, not a bare 204)
+$dq = Json @("-b", $A, "$Base/api/documents/$FD/diff?fromVersionId=$vD1&toVersionId=$vD2")
+Check "13-1 diff has status field" ($null -ne $dq -and $null -ne $dq.status) `
+    ("body: " + ($dq | ConvertTo-Json -Compress))
+
+# 13-2 worker eventually computes -> COMPLETED (poll up to ~42s; worker default initialDelay 20s + fixedDelay 15s)
+$done = $false
+for ($i = 0; $i -lt 14; $i++) {
+    Start-Sleep -Seconds 3
+    $dq = Json @("-b", $A, "$Base/api/documents/$FD/diff?fromVersionId=$vD1&toVersionId=$vD2")
+    if ($dq.status -eq "COMPLETED") { $done = $true; break }
+    if ($dq.status -eq "FAILED") { break }
+}
+Check "13-2 diff eventually COMPLETED" $done ("last status: " + $dq.status + " err: " + $dq.lastError)
+Check "13-3 completed diff has line stats" ($done -and ($dq.addedLines -ge 1)) ("added: " + $dq.addedLines)
+
+# 13-4 diff on a non-existent version pair = 204 (no such pair)
+Check "13-4 unknown diff pair = 204" `
+    ((Code @("-b", $A, "$Base/api/documents/$FD/diff?fromVersionId=nope&toVersionId=nope2")) -eq "204")
+
+# 13-5 retry on a COMPLETED pair = no-op, stays COMPLETED (200)
+$rt = Json @("-b", $A, "-d", "fromVersionId=$vD1&toVersionId=$vD2", "$Base/api/documents/$FD/diff/retry")
+Check "13-5 retry on completed = COMPLETED" ($rt.status -eq "COMPLETED") ("status: " + $rt.status)
+
+# 13-6 retry on a missing pair = 404
+Check "13-6 retry on missing pair = 404" `
+    ((Code @("-b", $A, "-d", "fromVersionId=x&toVersionId=y", "$Base/api/documents/$FD/diff/retry")) -eq "404")
+
+Write-Host "`n===== 14. P1a: MIME on version update (indirect smoke) =====" -ForegroundColor Cyan
+# Upload markdown, then modify with plain text (format change across versions). The fix passes the
+# PREVIOUS version's real MIME to the diff pipeline; here we smoke-test that a cross-format modify
+# still enqueues and completes a diff without error. (Exact fromMimeType assertion is in JUnit
+# VersionUpdatedMimeTest.)
+$md = NewFile "note.md" "# Title`nbody line`n"
+$uM  = Upload $A ("t"+$Run) $md $null
+$FM  = $uM.fileId
+$vM1 = $uM.version.versionId
+$txt = NewFile "note_v2.txt" "body line changed`n"
+$mM  = Json @("-b", $A, "-F", "file=@$txt", "$Base/api/documents/$FM/versions")
+$vM2 = $mM.versionId
+$dm = $false
+for ($i = 0; $i -lt 14; $i++) {
+    Start-Sleep -Seconds 3
+    $r = Json @("-b", $A, "$Base/api/documents/$FM/diff?fromVersionId=$vM1&toVersionId=$vM2")
+    if ($r.status -eq "COMPLETED") { $dm = $true; break }
+    if ($r.status -eq "FAILED") { break }
+}
+Check "14-1 cross-format diff completes (mime pipeline ok)" $dm `
+    ("last: " + $r.status + " err: " + $r.lastError)
+
+
 Write-Host "`n============================================" -ForegroundColor Cyan
 Write-Host ("RESULT: PASS " + $script:Pass + " / FAIL " + $script:Fail)
 if ($script:Fail -gt 0) {
@@ -286,6 +377,6 @@ if ($script:Fail -gt 0) {
     Write-Host "`nCopy the failed check names and their actual values."
     exit 1
 } else {
-    Write-Host "ALL CHECKS PASSED. All 6 improvements work correctly." -ForegroundColor Green
+    Write-Host "ALL CHECKS PASSED." -ForegroundColor Green
     exit 0
 }

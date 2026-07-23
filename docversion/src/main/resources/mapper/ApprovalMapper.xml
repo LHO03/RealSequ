@@ -8,9 +8,9 @@
          approver_id(레거시)는 채우지 않는다 — 승인자는 자식 테이블에. -->
     <insert id="insertRequest">
         INSERT INTO approval_requests
-            (id, file_id, requester_id, mode, status, open_marker, created_at)
+            (id, file_id, requester_id, mode, status, open_marker, target_version_id, created_at)
         VALUES
-            (#{id}, #{fileId}, #{requesterId}, #{mode}, 'OPEN', #{fileId}, #{createdAt})
+            (#{id}, #{fileId}, #{requesterId}, #{mode}, 'OPEN', #{fileId}, #{targetVersionId}, #{createdAt})
     </insert>
 
     <!-- 요청의 승인자 등록 (같은 요청에 같은 승인자는 uq_request_approver로 차단) -->
@@ -22,7 +22,7 @@
     <!-- 문서의 현재 OPEN 요청 -->
     <select id="findOpenByFile" resultType="map">
         SELECT id, file_id AS fileId, requester_id AS requesterId,
-               mode, status, created_at AS createdAt
+               mode, status, target_version_id AS targetVersionId, created_at AS createdAt
         FROM approval_requests
         WHERE file_id = #{fileId} AND status = 'OPEN'
         LIMIT 1
@@ -34,7 +34,7 @@
          잠금 순서 규약: documents 행을 먼저 잠근 뒤 호출할 것. -->
     <select id="findOpenByFileForUpdate" resultType="map">
         SELECT id, file_id AS fileId, requester_id AS requesterId,
-               mode, status, created_at AS createdAt
+               mode, status, target_version_id AS targetVersionId, created_at AS createdAt
         FROM approval_requests
         WHERE file_id = #{fileId} AND status = 'OPEN'
         LIMIT 1

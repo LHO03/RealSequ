@@ -19,6 +19,9 @@ public interface FilesVersionMapper {
     /** version_id로 storage_key 단건 조회 (이전 버전 콘텐츠 위치). */
     String selectStorageKey(@Param("versionId") String versionId);
 
+    /** P1: 이전 버전의 MIME 타입 조회 (VersionUpdated 이벤트의 fromMimeType 정확 전달용). 없으면 null. */
+    String selectMimetype(@Param("versionId") String versionId);
+
     /** 07/12 - RD-SRS-9.5 열람: 콘텐츠 응답에 필요한 버전 메타 단건 (file_id 대조용 포함). */
     java.util.Map<String, Object> findVersionForContent(@Param("versionId") String versionId);
 

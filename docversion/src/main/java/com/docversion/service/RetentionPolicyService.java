@@ -45,10 +45,10 @@ public class RetentionPolicyService {
                                int minDays, int maxDays, int maxVersions, boolean autoCleanup) {
         validateScope(scopeType, scopeId);
         if (minDays < 0 || maxDays < 0 || maxVersions < 0) {
-            throw new IllegalArgumentException("보관 기준은 0 이상이어야 합니다.");
+            throw new InvalidRequestException("보관 기준은 0 이상이어야 합니다.");
         }
         if (maxDays > 0 && minDays > 0 && minDays > maxDays) {
-            throw new IllegalArgumentException("최소 보관일이 최대 보관일보다 클 수 없습니다.");
+            throw new InvalidRequestException("최소 보관일이 최대 보관일보다 클 수 없습니다.");
         }
         String id = uuid.newId();
         long now = Instant.now().getEpochSecond();
@@ -60,7 +60,7 @@ public class RetentionPolicyService {
     public Map<String, Object> getPolicy(String id) {
         Map<String, Object> p = mapper.getPolicy(id);
         if (p == null) {
-            throw new IllegalArgumentException("정책을 찾을 수 없습니다: " + id);
+            throw new ResourceNotFoundException("정책을 찾을 수 없습니다: " + id);
         }
         return p;
     }
@@ -156,20 +156,20 @@ public class RetentionPolicyService {
             case "USER":   return mapper.filesByOwner(scopeId);
             case "FOLDER": return mapper.filesByFolderPrefix(scopeId);
             case "FILE":   return mapper.fileExists(scopeId) > 0 ? List.of(scopeId) : List.of();
-            default: throw new IllegalArgumentException("알 수 없는 범위: " + scopeType);
+            default: throw new InvalidRequestException("알 수 없는 범위: " + scopeType);
         }
     }
 
     private void validateScope(String scopeType, String scopeId) {
-        if (scopeType == null) throw new IllegalArgumentException("범위(scopeType)를 지정해야 합니다.");
+        if (scopeType == null) throw new InvalidRequestException("범위(scopeType)를 지정해야 합니다.");
         switch (scopeType) {
             case "GLOBAL": break;
             case "USER": case "FOLDER": case "FILE":
                 if (scopeId == null || scopeId.isBlank()) {
-                    throw new IllegalArgumentException(scopeType + " 범위는 대상 식별자(scopeId)가 필요합니다.");
+                    throw new InvalidRequestException(scopeType + " 범위는 대상 식별자(scopeId)가 필요합니다.");
                 }
                 break;
-            default: throw new IllegalArgumentException("범위는 GLOBAL/USER/FOLDER/FILE 중 하나여야 합니다.");
+            default: throw new InvalidRequestException("범위는 GLOBAL/USER/FOLDER/FILE 중 하나여야 합니다.");
         }
     }
 

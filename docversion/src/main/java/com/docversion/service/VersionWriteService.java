@@ -1,8 +1,10 @@
 package com.docversion.service;
 
 import com.docversion.domain.VersionInfo;
+import com.docversion.mapper.ApprovalMapper;
 import com.docversion.mapper.DocumentMapper;
 import com.docversion.mapper.FilesVersionMapper;
+import com.docversion.mapper.LifecycleMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,15 +25,24 @@ public class VersionWriteService {
     private final FilesVersionMapper filesVersionMapper;
     private final AuditLogService audit; // 목표 간극(나): 이력 기록은 AuditLogService로 일원화
     private final NotificationService notifications; // 목표 간극(가): 업로드 시 이해관계자 알림
+    // V11 클러스터 1: 열린 승인 요청 검사(정책 A)·상태 되돌림에 필요.
+    //   순환 의존을 피하려 ApprovalService/DocumentLifecycleService(빈)가 아니라 매퍼를 직접 주입한다
+    //   (memory 규약: DocumentLifecycleService에 ApprovalService 대신 ApprovalMapper 주입과 동일 원칙).
+    private final ApprovalMapper approvalMapper;
+    private final LifecycleMapper lifecycleMapper;
 
     public VersionWriteService(DocumentMapper documentMapper,
                                FilesVersionMapper filesVersionMapper,
                                AuditLogService audit,
-                               NotificationService notifications) {
+                               NotificationService notifications,
+                               ApprovalMapper approvalMapper,
+                               LifecycleMapper lifecycleMapper) {
         this.documentMapper = documentMapper;
         this.filesVersionMapper = filesVersionMapper;
         this.audit = audit;
         this.notifications = notifications;
+        this.approvalMapper = approvalMapper;
+        this.lifecycleMapper = lifecycleMapper;
     }
 
     /**
@@ -88,6 +99,13 @@ public class VersionWriteService {
             throw new IllegalStateException("문서 라이브 포인터 없음: " + newVersion.getFileId());
         }
 
+        // V11 클러스터 1: 정합성 정책 강제 (documents 행을 이미 잠근 상태 — 규약: documents → approval_requests).
+        //   문서 행 잠금이 승인 요청 생성(request의 getStatusForUpdate)과 직렬화되므로, 여기서 열린 요청을
+        //   평범히 읽어도 경합 없이 최신 상태를 본다(동시 request는 이 잠금에서 대기).
+        String currentStatus = asString(live.get("status"));
+        enforceModificationPolicy(newVersion.getFileId(), currentStatus, newVersion.getTimestamp(),
+                newVersion.getUserId());
+
         String previousVersionId = asString(live.get("currentVersionId"));
         long previousRevisionNo = asLong(live.get("currentRevisionNo"));
         long newRevisionNo = previousRevisionNo + 1;
@@ -97,6 +115,8 @@ public class VersionWriteService {
             // DB 정합성 오류 → 새 버전 생성 중단(C++와 동일 판단)
             throw new IllegalStateException("이전 버전 storage_key 누락: " + previousVersionId);
         }
+        // P1: 이전 버전의 실제 MIME (형식이 바뀌어도 이전 파일을 올바른 형식으로 파싱하도록).
+        String previousMimeType = filesVersionMapper.selectMimetype(previousVersionId);
 
         newVersion.setRevisionNo(newRevisionNo);
         filesVersionMapper.insertVersion(newVersion);
@@ -119,7 +139,39 @@ public class VersionWriteService {
         notifications.notifyStakeholders(newVersion.getFileId(), "새 버전",
                 "새 버전 v" + newRevisionNo + "이(가) 업로드되었습니다.", newVersion.getUserId());
 
-        return new ModifyResult(previousVersionId, previousRevisionNo, newRevisionNo, previousStorageKey);
+        return new ModifyResult(previousVersionId, previousRevisionNo, newRevisionNo,
+                previousStorageKey, previousMimeType);
+    }
+
+    /**
+     * V11 클러스터 1 — 새 버전 생성 시 상태·승인 정합성 정책 (정책 A). 호출 시점: documents 행 잠금 보유.
+     *
+     * <ol>
+     *   <li>열린 승인 요청이 있으면 → 업로드 거부(ModificationBlockedException → 409).
+     *       "검토 중인 버전이 승인자 몰래 바뀌는" 상황을 원천 차단한다.</li>
+     *   <li>열린 요청이 없고 현재 상태가 APPROVED면 → APPROVED → REVISION_DRAFT 전환(+상태 이력).
+     *       승인받은 것은 이전 버전이므로 새 버전에 "승인" 도장이 남지 않게 되돌린다.</li>
+     *   <li>그 외 상태는 버전만 생성하고 상태 불변.</li>
+     * </ol>
+     *
+     * <p>B 이음새: 훗날 "검토 중에도 업로드(supersede)"를 허용하려면, 1)에서 예외를 던지는 대신
+     * 기존 요청을 STALE로 종료 + REVISION_DRAFT 전환하는 분기를 <b>이 메서드 한 곳에만</b> 추가한다.
+     * 다른 코드는 손대지 않는다.
+     */
+    private void enforceModificationPolicy(String fileId, String currentStatus, long now, String actorId) {
+        // 1) 정책 A: 열린 승인 요청 동안 업로드 차단.
+        if (approvalMapper.findOpenByFile(fileId) != null) {
+            throw new ModificationBlockedException(
+                    "처리 대기 중인 승인 요청이 있어 새 버전을 올릴 수 없습니다. "
+                            + "먼저 승인 요청을 취소하거나 결재를 완료하십시오.");
+        }
+        // 2) 승인된 문서를 수정하면 다시 수정본 초안으로 (APPROVED → REVISION_DRAFT는 전이표상 허용).
+        //    상태 컬럼은 잠긴 documents 행에 있으므로 별도 잠금 없이 안전하게 갱신한다.
+        if ("APPROVED".equals(currentStatus)) {
+            lifecycleMapper.updateStatus(fileId, "REVISION_DRAFT", now);
+            lifecycleMapper.insertStatusHistory(fileId, "APPROVED", "REVISION_DRAFT",
+                    actorId, "새 버전 업로드로 수정본 초안 전환", now);
+        }
     }
 
     /**
@@ -157,6 +209,7 @@ public class VersionWriteService {
 
     /** persistModifiedVersion 결과. */
     public record ModifyResult(String previousVersionId, long previousRevisionNo,
-                               long newRevisionNo, String previousStorageKey) {
+                               long newRevisionNo, String previousStorageKey,
+                               String previousMimeType) {
     }
 }

@@ -15,11 +15,15 @@ import java.util.Map;
 @Mapper
 public interface ApprovalMapper {
 
-    /** 승인 요청 1건 생성 (status=OPEN, open_marker=file_id, mode 지정). */
+    /**
+     * 승인 요청 1건 생성 (status=OPEN, open_marker=file_id, mode 지정).
+     * V11: targetVersionId — 요청 생성 시점의 현재 버전을 승인 대상으로 고정한다.
+     */
     int insertRequest(@Param("id") String id,
                       @Param("fileId") String fileId,
                       @Param("requesterId") String requesterId,
                       @Param("mode") String mode,
+                      @Param("targetVersionId") String targetVersionId,
                       @Param("createdAt") long createdAt);
 
     /** 요청의 승인자 1명 등록 (seq는 입력 순서, 1부터). */

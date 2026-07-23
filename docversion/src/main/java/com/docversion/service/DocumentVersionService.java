@@ -172,7 +172,7 @@ public class DocumentVersionService {
         Map<String, Object> v = filesVersionMapper.findVersionForContent(versionId);
         if (v == null || !fileId.equals(String.valueOf(v.get("fileId")))) {
             // 존재하지 않거나, 경로의 문서와 무관한 버전 ID(다른 문서 버전 훔쳐보기) → 동일하게 404
-            throw new IllegalArgumentException("버전을 찾을 수 없습니다: " + versionId);
+            throw new ResourceNotFoundException("버전을 찾을 수 없습니다: " + versionId);
         }
         FileContent content = storage.readFile(String.valueOf(v.get("storageKey")));
 
@@ -207,7 +207,26 @@ public class DocumentVersionService {
 
     public Map<String, Object> getDiff(String userId, String fileId, String fromVersionId, String toVersionId) {
         access.requireRead(fileId, userId); // 07/19 - P1-②
-        return versionDiffMapper.findCached(fileId, fromVersionId, toVersionId);
+        // P1c: 상태(status: PENDING/PROCESSING/COMPLETED/FAILED)까지 포함해 반환.
+        //   UI는 status로 "생성 중"·"실패(재시도)"·완료를 구분한다. 쌍 자체가 없으면 null → 컨트롤러 204.
+        return versionDiffMapper.findByPair(fileId, fromVersionId, toVersionId);
+    }
+
+    /**
+     * P1c: 실패(FAILED)한 diff 계산을 다시 대기(PENDING)로 되돌린다. 워커가 재계산한다.
+     * FAILED가 아닌 상태(계산 중·완료)면 그대로 두고 현재 상태를 돌려준다.
+     * @throws ResourceNotFoundException 해당 (from,to) diff 작업 자체가 없을 때
+     */
+    public Map<String, Object> retryDiff(String userId, String fileId,
+                                         String fromVersionId, String toVersionId) {
+        access.requireRead(fileId, userId);
+        Map<String, Object> row = versionDiffMapper.findByPair(fileId, fromVersionId, toVersionId);
+        if (row == null) {
+            throw new ResourceNotFoundException("diff 작업을 찾을 수 없습니다.");
+        }
+        versionDiffMapper.resetToPending(fileId, fromVersionId, toVersionId,
+                java.time.Instant.now().getEpochSecond());
+        return versionDiffMapper.findByPair(fileId, fromVersionId, toVersionId);
     }
 
     // ==========================================================
@@ -286,7 +305,7 @@ public class DocumentVersionService {
         // 문서 없음 → IllegalArgument(404), 남의 문서 → Forbidden(403).
         String owner = documentMapper.findOwner(fileId);
         if (owner == null) {
-            throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);
+            throw new ResourceNotFoundException("문서를 찾을 수 없습니다: " + fileId);
         }
         if (!owner.equals(userId)) {
             throw new ForbiddenOperationException("문서 소유자만 새 버전을 올릴 수 있습니다.");
@@ -316,17 +335,25 @@ public class DocumentVersionService {
         VersionWriteService.ModifyResult result;
         try {
             result = writeService.persistModifiedVersion(version, reason);
+        } catch (ModificationBlockedException blocked) {
+            // V11 정책 A: 열린 승인 요청으로 업로드가 거부된 경우. 방금 쓴 파일은 보상 삭제하되,
+            //   사유(409)는 래핑하지 않고 그대로 전파해 클라이언트가 정확한 상태코드를 받게 한다.
+            safeDelete(storageKey);
+            throw blocked;
         } catch (RuntimeException e) {
             safeDelete(storageKey);
             throw new VersionOperationException("onDocumentModified DB 저장 실패", e);
         }
 
         // 3) 커밋 이후 부수효과: diff 캐시 계산/저장 + 알림 (실패해도 버전 생성 성공)
+        //    P1: fromMimeType은 이전 버전의 실제 MIME(result.previousMimeType())을 전달한다.
+        //    (과거엔 newContent.mimeType()을 이전·새 양쪽에 넣어, 형식이 바뀌면 이전 파일을
+        //     틀린 형식으로 파싱하던 버그가 있었다.)
         events.publishEvent(new VersionEvents.VersionUpdated(
                 fileId,
                 result.previousVersionId(), versionId,
                 result.previousStorageKey(), storageKey,
-                newContent.mimeType(), newContent.mimeType(),
+                result.previousMimeType(), newContent.mimeType(),
                 result.previousRevisionNo(), result.newRevisionNo(),
                 userId, timestamp));
 

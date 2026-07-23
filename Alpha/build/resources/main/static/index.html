@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>문서 형상관리 시스템 - 알파</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: "맑은 고딕", "Malgun Gothic", -apple-system, sans-serif;
+            background: #f4f6f8; color: #2c3e50;
+            font-size: 14px; line-height: 1.5;
+        }
+
+        header {
+            background: #1f3864; color: white;
+            padding: 16px 24px;
+            display: flex; justify-content: space-between; align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        header h1 { font-size: 18px; font-weight: 600; }
+        header h1 .subtitle { font-size: 13px; font-weight: 400; opacity: 0.8; margin-left: 8px; }
+
+        .user-switcher { display: flex; align-items: center; gap: 12px; }
+        .user-switcher label { font-size: 13px; opacity: 0.9; }
+        .user-switcher select {
+            padding: 6px 12px; border: none; border-radius: 4px;
+            font-size: 14px; background: white; color: #1f3864;
+            font-weight: 600; cursor: pointer;
+        }
+        .badge {
+            background: #e74c3c; color: white; border-radius: 12px;
+            padding: 2px 10px; font-size: 12px; font-weight: 600;
+            min-width: 36px; text-align: center; display: inline-block;
+        }
+        .badge.zero { background: #95a5a6; }
+
+        main {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 20px; padding: 20px;
+            max-width: 1400px; margin: 0 auto;
+        }
+        .panel {
+            background: white; border-radius: 8px; padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .panel h2 {
+            font-size: 16px; color: #1f3864;
+            margin-bottom: 16px; padding-bottom: 8px;
+            border-bottom: 2px solid #d9e2f3;
+        }
+        .panel-section { margin-bottom: 20px; }
+        .panel-section:last-child { margin-bottom: 0; }
+        .panel-section h3 {
+            font-size: 13px; color: #5a6c7d;
+            margin-bottom: 8px; font-weight: 600;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+
+        .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
+        button {
+            padding: 8px 16px; border: 1px solid #1f3864;
+            background: white; color: #1f3864;
+            border-radius: 4px; cursor: pointer;
+            font-size: 13px; font-weight: 500;
+            transition: all 0.15s; font-family: inherit;
+        }
+        button:hover:not(:disabled) { background: #1f3864; color: white; }
+        button:disabled { opacity: 0.4; cursor: not-allowed; }
+        button.primary { background: #1f3864; color: white; }
+        button.primary:hover:not(:disabled) { background: #142a4a; }
+        button.success { border-color: #27ae60; color: #27ae60; }
+        button.success:hover:not(:disabled) { background: #27ae60; color: white; }
+        button.danger { border-color: #e74c3c; color: #e74c3c; }
+        button.danger:hover:not(:disabled) { background: #e74c3c; color: white; }
+        button.small { padding: 4px 10px; font-size: 12px; }
+
+        select, input[type="text"] {
+            padding: 8px 12px; border: 1px solid #cbd3da;
+            border-radius: 4px; font-size: 13px;
+            font-family: inherit; background: white;
+        }
+        .approver-select-row {
+            display: flex; gap: 8px; align-items: center;
+            margin-bottom: 8px;
+        }
+        .approver-select-row select { flex: 1; }
+
+        .status-card {
+            background: linear-gradient(135deg, #f0f3f8 0%, #e2e8f0 100%);
+            border-radius: 6px; padding: 16px; margin-bottom: 16px;
+        }
+        .status-card .file-id {
+            font-family: "Consolas", monospace; font-size: 13px;
+            color: #5a6c7d; margin-bottom: 8px;
+        }
+        .status-display { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+        .status-label { font-size: 13px; color: #5a6c7d; }
+        .status-value {
+            padding: 4px 12px; border-radius: 12px;
+            font-size: 12px; font-weight: 600;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .status-value.draft { background: #ecf0f1; color: #7f8c8d; }
+        .status-value.under_review { background: #fef5e7; color: #d68910; }
+        .status-value.approved { background: #d5f4e6; color: #1e8449; }
+        .status-value.rejected { background: #fadbd8; color: #c0392b; }
+        .status-value.deprecated { background: #e8daef; color: #6c3483; }
+        .status-value.none { background: #ecf0f1; color: #95a5a6; }
+        .version-count { font-size: 12px; color: #5a6c7d; margin-top: 8px; }
+
+        .notification-list { max-height: 360px; overflow-y: auto; }
+        .notification-item {
+            padding: 12px; border-radius: 6px; margin-bottom: 8px;
+            background: #f8f9fa; border-left: 3px solid #cbd3da;
+            cursor: pointer; transition: all 0.15s;
+        }
+        .notification-item:hover { background: #eef1f4; }
+        .notification-item.unread {
+            background: #eaf2fb; border-left-color: #1f3864;
+            font-weight: 500;
+        }
+        .notification-item .notif-subject {
+            font-size: 12px; color: #1f3864; font-weight: 600;
+            margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.3px;
+        }
+        .notification-item .notif-message { font-size: 13px; color: #2c3e50; margin-bottom: 4px; }
+        .notification-item .notif-time { font-size: 11px; color: #95a5a6; }
+        .notification-item .read-indicator {
+            float: right; font-size: 10px; color: #27ae60; margin-top: 2px;
+        }
+
+        .activity-log {
+            max-height: 200px; overflow-y: auto;
+            font-family: "Consolas", monospace; font-size: 12px;
+            background: #2c3e50; color: #ecf0f1;
+            padding: 12px; border-radius: 4px;
+            white-space: pre-wrap; word-break: break-all;
+        }
+        .activity-log .log-time { color: #95a5a6; }
+        .activity-log .log-user { color: #3498db; }
+        .activity-log .log-action { color: #f39c12; }
+        .activity-log .log-success { color: #2ecc71; }
+        .activity-log .log-error { color: #e74c3c; }
+
+        .toast {
+            position: fixed; top: 80px; right: 20px;
+            padding: 12px 20px; border-radius: 6px;
+            color: white; font-size: 13px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            opacity: 0; transform: translateX(20px);
+            transition: all 0.3s; z-index: 1000;
+            max-width: 400px;
+        }
+        .toast.show { opacity: 1; transform: translateX(0); }
+        .toast.success { background: #27ae60; }
+        .toast.error { background: #e74c3c; }
+        .toast.info { background: #3498db; }
+
+        .empty-state {
+            text-align: center; color: #95a5a6;
+            font-size: 13px; padding: 24px 12px; font-style: italic;
+        }
+        .info-box {
+            background: #eaf2fb; border-left: 3px solid #1f3864;
+            padding: 8px 12px; font-size: 12px;
+            color: #1f3864; border-radius: 4px; margin-bottom: 12px;
+        }
+
+        /* 버전 히스토리 */
+        .version-list { max-height: 200px; overflow-y: auto; }
+        .version-item {
+            padding: 8px 12px; background: #f8f9fa;
+            border-left: 3px solid #3498db;
+            border-radius: 4px; margin-bottom: 6px;
+            font-size: 12px;
+        }
+        .version-item .v-id {
+            font-family: "Consolas", monospace; color: #1f3864;
+            font-weight: 600;
+        }
+        .version-item .v-meta {
+            display: flex; justify-content: space-between;
+            color: #5a6c7d; margin-top: 4px;
+        }
+
+        /* 승인 진행 상황 */
+        .approval-progress { font-size: 12px; }
+        .progress-row {
+            display: flex; justify-content: space-between;
+            padding: 4px 0; border-bottom: 1px dashed #ecf0f1;
+        }
+        .progress-row:last-child { border-bottom: none; }
+        .progress-label { color: #5a6c7d; }
+        .progress-value { color: #2c3e50; font-weight: 600; }
+        .progress-section-title {
+            font-size: 11px; color: #1f3864; font-weight: 600;
+            text-transform: uppercase; letter-spacing: 0.3px;
+            margin: 8px 0 4px 0;
+        }
+        .decision-item {
+            padding: 6px 10px; margin-bottom: 4px;
+            background: #f8f9fa; border-radius: 4px;
+            font-size: 11px;
+        }
+        .decision-item.approved { border-left: 3px solid #27ae60; }
+        .decision-item.rejected { border-left: 3px solid #e74c3c; }
+        .pending-tag {
+            display: inline-block;
+            padding: 2px 8px; margin-right: 4px; margin-bottom: 4px;
+            background: #fef5e7; color: #d68910;
+            border-radius: 10px; font-size: 11px; font-weight: 500;
+        }
+
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd3da; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #95a5a6; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>
+        문서 형상관리 시스템
+        <span class="subtitle">— 알파 (Java Spring 이식판)</span>
+    </h1>
+    <div class="user-switcher">
+        <label>현재 사용자:</label>
+        <select id="userSelect">
+            <option value="alice">alice (작성자)</option>
+            <option value="bob">bob (승인자)</option>
+            <option value="carol">carol (기타)</option>
+        </select>
+        <span class="badge zero" id="unreadBadge">🔔 0</span>
+    </div>
+</header>
+
+<main>
+    <div class="panel">
+        <h2>📁 파일 작업</h2>
+
+        <div class="status-card">
+            <div class="file-id" id="currentFileId">demo_file_001</div>
+            <div class="status-display">
+                <span class="status-label">상태:</span>
+                <span class="status-value none" id="currentStatus">없음</span>
+            </div>
+            <div class="version-count" id="versionCount">버전 수: -</div>
+        </div>
+
+        <div class="panel-section">
+            <h3>버전 관리</h3>
+            <div class="button-row">
+                <button id="btnCreateInitial" class="primary">📤 초기 버전 업로드</button>
+                <button id="btnUpdate">✏️ 문서 수정</button>
+            </div>
+        </div>
+
+        <div class="panel-section">
+            <h3>승인 워크플로우</h3>
+            <div class="approver-select-row">
+                <label style="font-size:12px;color:#5a6c7d;width:60px;">승인자:</label>
+                <select id="approverSelect" multiple size="3" style="flex:1;height:60px;">
+                    <option value="bob" selected>bob</option>
+                    <option value="carol">carol</option>
+                </select>
+            </div>
+            <div class="approver-select-row">
+                <label style="font-size:12px;color:#5a6c7d;width:60px;">합의 모드:</label>
+                <select id="consensusMode" style="flex:1;">
+                    <option value="THRESHOLD">THRESHOLD (임계값 도달)</option>
+                    <option value="UNANIMOUS">UNANIMOUS (만장일치)</option>
+                    <option value="SEQUENTIAL">SEQUENTIAL (순차 결정)</option>
+                </select>
+            </div>
+            <div class="approver-select-row" id="requiredRow">
+                <label style="font-size:12px;color:#5a6c7d;width:60px;">필요 수:</label>
+                <input type="number" id="requiredApprovals" value="1" min="1"
+                       style="flex:1;padding:8px 12px;border:1px solid #cbd3da;border-radius:4px;">
+            </div>
+            <div class="button-row">
+                <button id="btnRequestApproval">📋 승인 요청</button>
+                <button id="btnCancelApproval" class="danger">🚫 요청 취소</button>
+            </div>
+            <div class="button-row" style="margin-top:8px;">
+                <button id="btnApprove" class="success">✅ 승인</button>
+                <button id="btnReject" class="danger">❌ 거절</button>
+            </div>
+            <div style="font-size:11px;color:#95a5a6;margin-top:4px;">
+                💡 승인자 다중 선택: Ctrl(또는 Cmd) + 클릭
+            </div>
+        </div>
+
+        <div class="panel-section">
+            <h3>📋 승인 진행 상황</h3>
+            <div id="approvalProgress" class="approval-progress">
+                <div class="empty-state">진행 중인 승인 없음</div>
+            </div>
+        </div>
+
+        <div class="panel-section">
+            <h3>📜 활동 로그</h3>
+            <div class="activity-log" id="activityLog"></div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h2>🔔 알림 (<span id="currentUserName">alice</span>)</h2>
+
+        <div class="info-box">
+            상단의 사용자 토글로 다른 사용자 시점으로 전환할 수 있습니다.
+            알림은 3초마다 자동 갱신됩니다.
+        </div>
+
+        <div class="panel-section">
+            <h3>📦 버전 히스토리 (<span id="versionCountInline">0</span>건)</h3>
+            <div id="versionList" class="version-list">
+                <div class="empty-state">버전이 없습니다.</div>
+            </div>
+        </div>
+
+        <div class="panel-section">
+            <h3>
+                알림 목록
+                <button id="btnRefresh" class="small" style="float:right;">🔄 새로고침</button>
+            </h3>
+            <div class="notification-list" id="notificationList">
+                <div class="empty-state">알림이 없습니다.</div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const state = {
+    currentUser: "alice",
+    fileId: "demo_file_001",
+    fileStatus: "none",
+};
+
+const STATUS_LABELS = {
+    none: "없음", draft: "초안", under_review: "검토중",
+    approved: "승인됨", rejected: "거절됨", deprecated: "폐기됨",
+};
+
+async function apiCall(method, path, body = null) {
+    const options = {
+        method,
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+    };
+    if (body) options.body = JSON.stringify(body);
+
+    try {
+        const res = await fetch(path, options);
+        const text = await res.text();
+        const data = text ? JSON.parse(text) : {};
+
+        logActivity(method, path, res.status, res.ok);
+        if (!res.ok) {
+            throw new Error(data.message || `HTTP ${res.status}`);
+        }
+        return data;
+    } catch (err) {
+        logActivity(method, path, "ERR", false, err.message);
+        throw err;
+    }
+}
+
+let toastTimer = null;
+function showToast(message, type = "info") {
+    const el = document.getElementById("toast");
+    el.textContent = message;
+    el.className = `toast ${type} show`;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove("show"), 3500);
+}
+
+function logActivity(method, path, status, ok, errorMsg = null) {
+    const el = document.getElementById("activityLog");
+    const time = new Date().toLocaleTimeString("ko-KR", { hour12: false });
+    const statusColor = ok ? "log-success" : "log-error";
+    const shortPath = path.length > 50 ? path.substring(0, 47) + "..." : path;
+
+    const entry = document.createElement("div");
+    entry.innerHTML =
+        `<span class="log-time">${time}</span> ` +
+        `<span class="log-user">${state.currentUser}</span> → ` +
+        `<span class="log-action">${method}</span> ${shortPath} ` +
+        `<span class="${statusColor}">[${status}]</span>` +
+        (errorMsg ? ` <span class="log-error">${escapeHtml(errorMsg)}</span>` : "");
+
+    el.insertBefore(entry, el.firstChild);
+    while (el.children.length > 20) el.removeChild(el.lastChild);
+}
+
+async function createInitialVersion() {
+    try {
+        const result = await apiCall("POST", "/api/versions/initial", {
+            userId: state.currentUser,
+            fileId: state.fileId,
+            size: 1024,
+            mimeType: "text/plain",
+        });
+        showToast(`초기 버전 생성됨`, "success");
+        await refreshAll();
+    } catch (err) {
+        showToast(`실패: ${err.message}`, "error");
+    }
+}
+
+async function updateDocument() {
+    try {
+        await apiCall("POST", "/api/versions/update", {
+            userId: state.currentUser,
+            fileId: state.fileId,
+            size: 2048,
+            mimeType: "text/plain",
+        });
+        showToast(`새 버전 추가됨`, "success");
+        await refreshAll();
+    } catch (err) {
+        showToast(`실패: ${err.message}`, "error");
+    }
+}
+
+async function requestApproval() {
+    // 다중 선택된 승인자들 수집
+    const selectEl = document.getElementById("approverSelect");
+    const approvers = Array.from(selectEl.selectedOptions).map(o => o.value);
+
+    if (approvers.length === 0) {
+        showToast("승인자를 1명 이상 선택해주세요", "error");
+        return;
+    }
+
+    const consensusMode = document.getElementById("consensusMode").value;
+    let requiredApprovals = parseInt(document.getElementById("requiredApprovals").value) || 1;
+    // UNANIMOUS/SEQUENTIAL은 백엔드가 자동으로 approvers.length로 정규화하지만
+    // 사용자가 입력한 값이 범위 벗어나면 클램프
+    if (requiredApprovals > approvers.length) requiredApprovals = approvers.length;
+    if (requiredApprovals < 1) requiredApprovals = 1;
+
+    try {
+        await apiCall("POST", "/api/approvals/request", {
+            userId: state.currentUser,
+            fileId: state.fileId,
+            comment: "검토 부탁드립니다",
+            approvers: approvers,
+            consensusMode: consensusMode,
+            requiredApprovals: requiredApprovals,
+        });
+        showToast(`승인 요청 완료 → ${approvers.join(", ")} [${consensusMode}]`, "success");
+        state.fileStatus = "under_review";
+        await refreshAll();
+    } catch (err) {
+        showToast(`실패: ${err.message}`, "error");
+    }
+}
+
+async function cancelApproval() {
+    if (!confirm("진행 중인 승인 요청을 취소하시겠습니까?")) return;
+    try {
+        await apiCall("POST", "/api/approvals/cancel", {
+            userId: state.currentUser,
+            fileId: state.fileId,
+            comment: "요청자 취소",
+        });
+        showToast(`승인 요청 취소됨 → DRAFT로 복귀`, "success");
+        await refreshAll();
+    } catch (err) {
+        showToast(`실패: ${err.message}`, "error");
+    }
+}
+
+async function decideApproval(action) {
+    const comment = action === "APPROVE"
+        ? "검토 완료, 승인합니다"
+        : "수정 필요, 거절합니다";
+    try {
+        const result = await apiCall("POST", "/api/approvals/decide", {
+            userId: state.currentUser,
+            fileId: state.fileId,
+            action: action,
+            comment: comment,
+        });
+        showToast(`${action === "APPROVE" ? "승인" : "거절"} 완료 (합의 진행 중일 수 있음)`, "success");
+        // finalStatus는 백엔드가 더 이상 직접 반환하지 않음 (합의 평가 결과에 따라 다름)
+        // refreshAll에서 백엔드 상태를 다시 조회
+        await refreshAll();
+    } catch (err) {
+        showToast(`실패: ${err.message}`, "error");
+    }
+}
+
+async function loadNotifications() {
+    try {
+        const notifs = await apiCall("GET", `/api/notifications?userId=${state.currentUser}`);
+        renderNotifications(notifs);
+    } catch (err) {}
+}
+
+async function loadUnreadCount() {
+    try {
+        const result = await apiCall("GET", `/api/notifications/unread-count?userId=${state.currentUser}`);
+        updateBadge(result.unreadCount);
+    } catch (err) {}
+}
+
+// Group A: 조회 API 호출 함수들 (05/15 추가)
+async function loadFileStatus() {
+    try {
+        const result = await apiCall("GET", `/api/files/${state.fileId}/status`);
+        // 빈 문자열이면 "none"으로 표시
+        state.fileStatus = result.status || "none";
+        updateStatusDisplay();
+    } catch (err) {}
+}
+
+async function loadVersions() {
+    try {
+        const result = await apiCall("GET", `/api/files/${state.fileId}/versions?limit=20`);
+        renderVersions(result.versions, result.total);
+    } catch (err) {}
+}
+
+async function loadApprovalProgress() {
+    try {
+        const result = await apiCall("GET", `/api/files/${state.fileId}/approval-progress`);
+        renderApprovalProgress(result);
+    } catch (err) {}
+}
+
+async function markRead(notificationId) {
+    try {
+        await apiCall("POST", `/api/notifications/${notificationId}/read?userId=${state.currentUser}`);
+        await loadNotifications();
+        await loadUnreadCount();
+    } catch (err) {
+        showToast(`읽음 처리 실패: ${err.message}`, "error");
+    }
+}
+
+function renderNotifications(notifs) {
+    const el = document.getElementById("notificationList");
+    if (!notifs || notifs.length === 0) {
+        el.innerHTML = '<div class="empty-state">알림이 없습니다.</div>';
+        return;
+    }
+    el.innerHTML = "";
+    for (const n of notifs) {
+        const isUnread = n.readAt === null || n.readAt === undefined;
+        const div = document.createElement("div");
+        div.className = `notification-item ${isUnread ? "unread" : ""}`;
+        const time = new Date(n.timestamp * 1000).toLocaleTimeString("ko-KR", { hour12: false });
+        div.innerHTML =
+            `<div class="notif-subject">${escapeHtml(n.subject)}` +
+            (isUnread ? '' : '<span class="read-indicator">✓ 읽음</span>') +
+            `</div>` +
+            `<div class="notif-message">${escapeHtml(n.message)}</div>` +
+            `<div class="notif-time">${time}</div>`;
+        if (isUnread) {
+            div.onclick = () => markRead(n.notificationId);
+        }
+        el.appendChild(div);
+    }
+}
+
+// Group A 렌더 함수들 (05/15 추가)
+function renderVersions(versions, total) {
+    const el = document.getElementById("versionList");
+    const countEl = document.getElementById("versionCountInline");
+    countEl.textContent = total || 0;
+
+    if (!versions || versions.length === 0) {
+        el.innerHTML = '<div class="empty-state">버전이 없습니다.</div>';
+        return;
+    }
+    el.innerHTML = "";
+    for (const v of versions) {
+        const div = document.createElement("div");
+        div.className = "version-item";
+        const time = new Date(v.timestamp * 1000).toLocaleString("ko-KR", { hour12: false });
+        // versionId 가독성: fileId.v{timestamp}_{counter}에서 끝부분만 표시
+        const shortId = v.versionId.substring(v.versionId.lastIndexOf(".v"));
+        div.innerHTML =
+            `<div class="v-id">${escapeHtml(shortId)}</div>` +
+            `<div class="v-meta">` +
+            `  <span>👤 ${escapeHtml(v.userId)}</span>` +
+            `  <span>📅 ${time}</span>` +
+            `  <span>📏 ${v.size} bytes</span>` +
+            `</div>`;
+        el.appendChild(div);
+    }
+}
+
+function renderApprovalProgress(progress) {
+    const el = document.getElementById("approvalProgress");
+
+    // rule이 비어있으면 (객체가 비어있거나 키 없음) "진행 중인 승인 없음"
+    if (!progress.rule || Object.keys(progress.rule).length === 0) {
+        el.innerHTML = '<div class="empty-state">진행 중인 승인 없음</div>';
+        return;
+    }
+
+    const c = progress.counters || {};
+    const decisions = progress.decisions || [];
+    const pending = progress.pending || [];
+
+    let html = "";
+
+    // 규칙 메타
+    html += `<div class="progress-row">`;
+    html += `<span class="progress-label">규칙 ID:</span>`;
+    html += `<span class="progress-value" style="font-family:Consolas,monospace;font-size:11px">${escapeHtml(progress.rule.id || "")}</span>`;
+    html += `</div>`;
+    html += `<div class="progress-row">`;
+    html += `<span class="progress-label">상태:</span>`;
+    html += `<span class="progress-value">${escapeHtml(progress.rule.status || "")}</span>`;
+    html += `</div>`;
+    html += `<div class="progress-row">`;
+    html += `<span class="progress-label">합의 모드:</span>`;
+    html += `<span class="progress-value">${escapeHtml(c.mode || "")} (필요 ${c.required}/총 ${c.total_approvers})</span>`;
+    html += `</div>`;
+    html += `<div class="progress-row">`;
+    html += `<span class="progress-label">결과:</span>`;
+    html += `<span class="progress-value">✅ ${c.received_approvals || 0}건 / ❌ ${c.received_rejections || 0}건</span>`;
+    html += `</div>`;
+
+    // 결정 이력
+    if (decisions.length > 0) {
+        html += `<div class="progress-section-title">결정 이력</div>`;
+        for (const d of decisions) {
+            const action = d.action || "";
+            const time = d.timestamp
+                ? new Date(parseInt(d.timestamp) * 1000).toLocaleTimeString("ko-KR", { hour12: false })
+                : "";
+            html += `<div class="decision-item ${action}">`;
+            html += `<strong>${escapeHtml(d.user_id || "")}</strong> → ${escapeHtml(action)}`;
+            if (d.comment) html += ` <span style="color:#5a6c7d">"${escapeHtml(d.comment)}"</span>`;
+            html += ` <span style="float:right;color:#95a5a6">${time}</span>`;
+            html += `</div>`;
+        }
+    }
+
+    // 미결 승인자
+    if (pending.length > 0) {
+        html += `<div class="progress-section-title">미결 승인자</div>`;
+        html += `<div>`;
+        for (const p of pending) {
+            html += `<span class="pending-tag">⏳ ${escapeHtml(p.user_id || "")}`;
+            if (p.sequence_order && p.sequence_order !== "0") {
+                html += ` (#${p.sequence_order})`;
+            }
+            html += `</span>`;
+        }
+        html += `</div>`;
+    }
+
+    el.innerHTML = html;
+}
+
+function updateBadge(count) {
+    const badge = document.getElementById("unreadBadge");
+    badge.textContent = `🔔 ${count}`;
+    badge.className = count > 0 ? "badge" : "badge zero";
+}
+
+function updateStatusDisplay() {
+    const el = document.getElementById("currentStatus");
+    el.textContent = STATUS_LABELS[state.fileStatus] || state.fileStatus;
+    el.className = `status-value ${state.fileStatus}`;
+}
+
+function updateUserDisplay() {
+    document.getElementById("currentUserName").textContent = state.currentUser;
+    document.getElementById("userSelect").value = state.currentUser;
+}
+
+function escapeHtml(str) {
+    if (str === null || str === undefined) return "";
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+async function refreshAll() {
+    updateUserDisplay();
+    // 백엔드에서 실제 상태/버전/진행상황 + 사용자별 알림 모두 가져오기
+    // updateStatusDisplay()는 loadFileStatus 내부에서 자동 호출됨
+    await Promise.all([
+        loadFileStatus(),       // Group A: 파일 상태 백엔드 조회 (state.fileStatus 갱신)
+        loadVersions(),         // Group A: 버전 히스토리 + 카운트
+        loadApprovalProgress(), // Group A: 승인 진행 상황
+        loadNotifications(),
+        loadUnreadCount(),
+    ]);
+}
+
+let pollTimer = null;
+function startPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    // 사용자 알림과 파일 상태는 다른 사용자의 작업으로 변할 수 있으므로 3초마다 자동 갱신
+    pollTimer = setInterval(async () => {
+        await Promise.all([
+            loadFileStatus(),
+            loadVersions(),
+            loadApprovalProgress(),
+            loadNotifications(),
+            loadUnreadCount(),
+        ]);
+    }, 3000);
+}
+
+document.getElementById("userSelect").addEventListener("change", async (e) => {
+    state.currentUser = e.target.value;
+    await refreshAll();
+    showToast(`사용자 전환: ${state.currentUser}`, "info");
+});
+document.getElementById("btnCreateInitial").addEventListener("click", createInitialVersion);
+document.getElementById("btnUpdate").addEventListener("click", updateDocument);
+document.getElementById("btnRequestApproval").addEventListener("click", requestApproval);
+document.getElementById("btnCancelApproval").addEventListener("click", cancelApproval);
+document.getElementById("btnApprove").addEventListener("click", () => decideApproval("APPROVE"));
+document.getElementById("btnReject").addEventListener("click", () => decideApproval("REJECT"));
+document.getElementById("btnRefresh").addEventListener("click", refreshAll);
+
+// 합의 모드 변경 시 "필요 수" 입력 표시/숨김
+document.getElementById("consensusMode").addEventListener("change", (e) => {
+    const requiredRow = document.getElementById("requiredRow");
+    if (e.target.value === "THRESHOLD") {
+        requiredRow.style.display = "";
+    } else {
+        // UNANIMOUS/SEQUENTIAL은 자동 결정 (approvers 전체 수)
+        requiredRow.style.display = "none";
+    }
+});
+
+refreshAll();
+startPolling();
+console.log("문서 형상관리 시스템 GUI 시작");
+</script>
+</body>
+</html>

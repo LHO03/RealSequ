@@ -37,13 +37,13 @@ public class DocumentAccessPolicy {
     /**
      * 문서 읽기 자격 검사. 통과 시 소유자 ID 반환(호출부에서 재조회 방지용).
      *
-     * @throws IllegalArgumentException    문서 없음 (컨트롤러에서 404)
+     * @throws ResourceNotFoundException    문서 없음 (컨트롤러 어드바이스에서 404)
      * @throws ForbiddenOperationException 자격 없음 (컨트롤러에서 403)
      */
     public String requireRead(String fileId, String userId) {
         String owner = documents.findOwner(fileId);
         if (owner == null) {
-            throw new IllegalArgumentException("문서를 찾을 수 없습니다: " + fileId);
+            throw new ResourceNotFoundException("문서를 찾을 수 없습니다: " + fileId);
         }
         if (userId == null || userId.isBlank()) {
             throw new ForbiddenOperationException("로그인이 필요합니다.");
