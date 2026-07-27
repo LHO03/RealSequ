@@ -61,8 +61,6 @@ class VersionLifecycleParityTest {
         registry.add("spring.datasource.username", mariadb::getUsername);
         registry.add("spring.datasource.password", mariadb::getPassword);
         registry.add("docversion.storage.base-path", () -> STORAGE_DIR.toString());
-        // P1c: 스케줄 diff 워커가 테스트 도중 끼어들지 않도록 첫 실행을 1시간 뒤로 미룬다(수동 runOnce만 검증).
-        registry.add("docversion.diff.worker.initial-delay-ms", () -> "3600000");
     }
 
     @Autowired

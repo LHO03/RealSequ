@@ -258,7 +258,7 @@
         <span id="at-note" style="font-size:12px;color:var(--ink-soft)"></span>
       </div>
       <table>
-        <thead><tr><th>rev</th><th>version_id</th><th>작성자</th><th>크기</th><th>시각</th></tr></thead>
+        <thead><tr><th>rev</th><th>version_id</th><th>작성자</th><th>사유</th><th>크기</th><th>시각</th></tr></thead>
         <tbody id="vbody"></tbody>
       </table>
 
@@ -376,6 +376,8 @@ let active = null;
 /* 07/19 - P1-④(XSS): 사용자·서버 문자열을 innerHTML에 넣기 전 반드시 통과시킨다.
    파일명/경로/사유/알림/payload 등에 <img src=x onerror=...> 같은 값이 들어와도
    태그로 해석되지 않고 문자로 표시된다. */
+// 빈 값 자리표시자. esc() 안에 넣으면 태그가 그대로 글자로 출력되므로 반드시 밖에서 사용한다.
+const DASH = '<span style="color:var(--ink-soft)">—</span>';
 function esc(v){
   if(v===null||v===undefined) return "";
   return String(v)
@@ -494,11 +496,15 @@ document.getElementById("r-btn").onclick=loadVersions;
 let versions=[];
 function renderVersions(list){
   const tb=document.getElementById("vbody"); tb.innerHTML="";
-  if(!list.length){ tb.innerHTML='<tr><td colspan="5" class="empty">해당 시점 이전의 버전이 없습니다.</td></tr>'; return; }
+  if(!list.length){ tb.innerHTML='<tr><td colspan="6" class="empty">해당 시점 이전의 버전이 없습니다.</td></tr>'; return; }
   list.forEach(v=>{
     const tr=document.createElement("tr");
+    // 9.3: 업로드 시 입력한 수정 사유. 응답에는 파싱된 metadataMap으로만 내려온다(원본 metadata는 미노출).
+    const reason = v.metadataMap && v.metadataMap.reason;
     tr.innerHTML=`<td class="revbadge">v${esc(v.revisionNo)}</td><td class="vid">${esc(short(v.versionId))}</td>
-      <td>${esc(v.userId||"-")}</td><td class="mono" style="font-size:11px">${esc(fmtSize(v.size))}</td>
+      <td>${esc(v.userId||"-")}</td>
+      <td>${reason ? esc(reason) : DASH}</td>
+      <td class="mono" style="font-size:11px">${esc(fmtSize(v.size))}</td>
       <td class="mono" style="font-size:11px;color:var(--ink-soft)">${esc(fmtTime(v.timestamp))}</td>`;
     tb.appendChild(tr);
   });
@@ -542,8 +548,33 @@ async function loadDiff(){
   const chips=document.getElementById("d-chips"), view=document.getElementById("diffview");
   if(from===to){ view.innerHTML='<div class="ln meta" style="padding:14px">같은 버전입니다.</div>'; chips.innerHTML=""; return; }
   const r=await api(`${API}/${active}/diff?fromVersionId=${from}&toVersionId=${to}`);
-  if(r.status===204){ view.innerHTML='<div class="ln meta" style="padding:14px">이 조합의 diff 캐시가 없습니다. (연속한 두 버전만 캐시됩니다)</div>'; chips.innerHTML=""; return; }
+  if(r.status===204){ view.innerHTML='<div class="ln meta" style="padding:14px">이 조합의 diff 작업이 없습니다. (연속한 두 버전만 계산됩니다)</div>'; chips.innerHTML=""; return; }
   const d=await r.json();
+
+  // 9.4 / V12: 계산은 배경 워커가 수행하므로 상태에 따라 표시가 달라진다.
+  //   PENDING·PROCESSING = 아직 계산 전 → "변경 없음"으로 오인시키지 않는다.
+  //   FAILED             = 재시도 경로를 제시한다.
+  if(d.status==="PENDING" || d.status==="PROCESSING"){
+    chips.innerHTML=`<span class="chip method">${esc(d.status)}</span>`;
+    view.innerHTML='<div class="ln meta" style="padding:14px">계산 중입니다. 잠시 후 다시 <b>비교</b>를 눌러 주세요.</div>';
+    return;
+  }
+  if(d.status==="FAILED"){
+    chips.innerHTML=`<span class="chip del">${esc(d.status)}</span>`;
+    view.innerHTML=`<div class="ln meta" style="padding:14px">계산에 실패했습니다 (시도 ${esc(d.attempts)}회).
+      <div style="margin-top:6px;color:var(--ink-soft)">${d.lastError ? esc(d.lastError) : DASH}</div>
+      <button class="ghost" id="d-retry" style="margin-top:10px">재시도</button></div>`;
+    document.getElementById("d-retry").onclick=async()=>{
+      const fd=new FormData();
+      fd.append("fromVersionId", from);
+      fd.append("toVersionId", to);
+      const rr=await api(`${API}/${active}/diff/retry`,{method:"POST",body:fd});
+      if(!rr.ok){ toast("재시도 요청 실패: HTTP "+rr.status, true); return; }
+      toast("재계산을 요청했습니다. 잠시 후 다시 비교해 주세요.");
+      loadDiff();
+    };
+    return;
+  }
   chips.innerHTML=`<span class="chip method">${esc(d.diffMethod)}</span><span class="chip add">+${esc(d.addedLines)}</span><span class="chip del">−${esc(d.deletedLines)}</span>`;
   renderDiff(d.hunksJson||"");
 }
@@ -616,7 +647,7 @@ async function loadStatusHistory(){
       const tr=document.createElement("tr");
       const from=h.fromStatus?stLabel(h.fromStatus):"(최초)";
       tr.innerHTML=`<td><span class="mono" style="font-size:11px">${esc(from)} → ${stLabel(h.toStatus)}</span></td>
-        <td>${esc(h.reason||'<span style="color:var(--ink-soft)">—</span>')}</td>
+        <td>${h.reason ? esc(h.reason) : DASH}</td>
         <td>${esc(h.changedBy||"-")}</td>
         <td class="mono" style="font-size:11px;color:var(--ink-soft)">${esc(fmtTime(h.changedAt))}</td>`;
       tb.appendChild(tr);

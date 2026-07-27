@@ -29,7 +29,13 @@ public final class DiffTypes {
             };
         }
 
-        /** C++ stringToDiffMethod 대응. 알 수 없는 값은 안전 기본값 TEXT_DIRECT. */
+        /**
+         * C++ stringToDiffMethod 대응. 알 수 없는 값은 안전 기본값 TEXT_DIRECT.
+         *
+         * <p><b>07/24 현재 호출부 없음.</b> diff 조회 결과를 Map 그대로 반환하고 있어
+         * DB 문자열을 열거형으로 되돌릴 일이 없다. {@link #toDbValue()}의 역변환이며
+         * C++ 원본과의 대응 관계를 유지하기 위해 남겨 둔다. 조회 응답을 타입화하면 다시 쓰인다.
+         */
         public static DiffMethod fromDbValue(String s) {
             if (s == null) return TEXT_DIRECT;
             return switch (s) {

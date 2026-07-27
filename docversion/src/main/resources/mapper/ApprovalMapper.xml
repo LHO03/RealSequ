@@ -95,6 +95,11 @@
             (#{requestId}, #{actorId}, #{action}, #{comment}, #{timestamp})
     </insert>
 
+    <!-- P1d: 사건 식별자용 일련번호. insertActivity 직후 호출 = 방금 넣은 행의 순번. -->
+    <select id="countActivity" resultType="int">
+        SELECT COUNT(*) FROM approval_activity WHERE request_id = #{requestId}
+    </select>
+
     <!-- 문서의 승인 요청 이력(최신순) + 승인 현황 집계 -->
     <select id="listByFile" resultType="map">
         SELECT r.id, r.requester_id AS requesterId, r.mode, r.status,

@@ -35,6 +35,11 @@
             (#{fileId}, #{fromStatus}, #{toStatus}, #{changedBy}, #{reason}, #{changedAt})
     </insert>
 
+    <!-- P1d: 사건 식별자용 일련번호. insertStatusHistory 직후 호출 = 방금 넣은 행의 순번. -->
+    <select id="countStatusHistory" resultType="int">
+        SELECT COUNT(*) FROM document_status_history WHERE file_id = #{fileId}
+    </select>
+
     <!-- 상태 변경 이력 목록 (최신순) -->
     <select id="listStatusHistory" resultType="map">
         SELECT from_status  AS fromStatus,

@@ -6,30 +6,17 @@ import org.apache.ibatis.annotations.Param;
 import java.util.Map;
 
 /**
- * version_diffs 캐시 매퍼 (RD-SRS-9.4).
- * onDocumentModified 후처리에서 (이전→새) diff를 INSERT IGNORE로 적재.
+ * version_diffs 매퍼 (RD-SRS-9.4).
+ *
+ * <p>P1c 이후 이 테이블은 결과 캐시가 아니라 <b>계산 작업 테이블</b>이다.
+ * 문서 수정 시 리스너가 PENDING 행을 적재하고, {@link com.docversion.diff.DiffJobWorker}가
+ * 점유·계산·전이를 수행한다. 상태는 PENDING → PROCESSING → COMPLETED/FAILED.
+ *
+ * <p>07/24: 동기 계산 시절의 insertIgnore·findCached를 제거했다(호출부 없음).
+ * 적재는 insertPending, 조회는 findByPair가 대신한다.
  */
 @Mapper
 public interface VersionDiffMapper {
-
-    /**
-     * diff 캐시 적재. INSERT IGNORE — UNIQUE(file_id,from,to) 충돌 시 무시
-     * (MariaDB 확정 전제, SQL 그대로 보존). 캐시 실패는 버전 생성에 영향 없음.
-     */
-    int insertIgnore(@Param("fileId") String fileId,
-                     @Param("fromVersionId") String fromVersionId,
-                     @Param("toVersionId") String toVersionId,
-                     @Param("diffMethod") String diffMethod,
-                     @Param("addedLines") int addedLines,
-                     @Param("deletedLines") int deletedLines,
-                     @Param("summary") String summary,
-                     @Param("hunksJson") String hunksJson,
-                     @Param("createdAt") long createdAt);
-
-    /** 캐시 단건 조회(UI 직접 조회용). 없으면 null. */
-    Map<String, Object> findCached(@Param("fileId") String fileId,
-                                   @Param("fromVersionId") String fromVersionId,
-                                   @Param("toVersionId") String toVersionId);
 
     // ==========================================================
     // P1c: diff 작업 상태 기계 (PENDING → PROCESSING → COMPLETED/FAILED)

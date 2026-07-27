@@ -62,8 +62,6 @@ class DiffJobStateTest {
         registry.add("spring.datasource.username", mariadb::getUsername);
         registry.add("spring.datasource.password", mariadb::getPassword);
         registry.add("docversion.storage.base-path", () -> STORAGE_DIR.toString());
-        // 스케줄 워커가 끼어들지 않게 첫 실행을 멀리 미룬다(수동 runOnce만).
-        registry.add("docversion.diff.worker.initial-delay-ms", () -> "3600000");
     }
 
     @Autowired DocumentVersionService service;

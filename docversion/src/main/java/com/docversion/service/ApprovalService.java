@@ -135,19 +135,22 @@ public class ApprovalService {
         }
         String c = blankToNull(comment);
         mapper.insertActivity(id, requesterId, "REQUESTED", c, now);
+        // P1d: 사건 식별자 = 이 요청의 이력 일련번호. 아래 두 알림은 같은 사건에서 나가므로
+        //   종류(req/turn)를 덧붙여 구분한다 — 안 그러면 첫 승인자가 둘 중 하나만 받는다.
+        String evReq = "apr:" + id + ":a" + mapper.countActivity(id);
 
         // 이해관계자 등록 + 알림 (같은 트랜잭션)
         notifications.subscribe(fileId, requesterId);
         for (String a : cleaned) {
             notifications.subscribe(fileId, a);
         }
-        notifications.notifyStakeholders(fileId, "승인 요청",
+        notifications.notifyStakeholders(fileId, evReq + ":req", "승인 요청",
                 requesterId + "님이 승인을 요청했습니다. (방식: " + modeLabel(m)
                         + ", 승인자: " + String.join(", ", cleaned) + ")", requesterId);
         if (m.equals("SEQUENTIAL")) {
             // 순차: 첫 번째 승인자에게 "당신 차례" 대상 지정 알림 (4-B)
             String first = cleaned.iterator().next();
-            notifications.notifyUser(first, fileId, "승인 차례",
+            notifications.notifyUser(first, fileId, evReq + ":turn", "승인 차례",
                     "순차 결재의 1번 차례입니다. 승인 또는 반려를 처리해 주세요. (요청자: " + requesterId + ")");
         }
         return getState(fileId);
@@ -247,7 +250,10 @@ public class ApprovalService {
 
         if (finalApproved == null) {
             // 아직 미확정 — 진행 상황 알림
-            notifications.notifyStakeholders(fileId, "승인 진행",
+            // P1d: 판정 이력의 일련번호를 사건 식별자로 쓴다. 번복(retract) 후 같은 사람이
+            //   다시 판정해도 이력 행이 새로 쌓이므로 번호가 달라져 알림이 유실되지 않는다.
+            final String evDecide = "apr:" + id + ":a" + mapper.countActivity(id);
+            notifications.notifyStakeholders(fileId, evDecide + ":progress", "승인 진행",
                     actorLabel + "님이 " + (approved ? "승인" : "반려") + "했습니다. (승인 "
                             + ok + " / 반려 " + no + " / 전체 " + n + ")", actorId);
             // 순차: 다음 순번에게 "당신 차례" 알림 (승인으로 줄이 넘어간 경우)
@@ -256,7 +262,8 @@ public class ApprovalService {
                         .filter(a -> "PENDING".equals(a.get("decision")))
                         .findFirst()
                         .ifPresent(next -> notifications.notifyUser(
-                                String.valueOf(next.get("approverId")), fileId, "승인 차례",
+                                String.valueOf(next.get("approverId")), fileId,
+                                evDecide + ":turn", "승인 차례",
                                 "순차 결재의 " + next.get("seq") + "번 차례가 되었습니다. 승인 또는 반려를 처리해 주세요."));
             }
             return getState(fileId);
@@ -277,7 +284,8 @@ public class ApprovalService {
                 mapper.insertActivity(id, actorId, "STALE",
                         "승인 대상 버전이 변경되어 요청을 무효화했습니다. (대상 " + targetVersionId
                                 + " / 현재 " + currentVersionId + ")", now);
-                notifications.notifyStakeholders(fileId, "요청 무효화",
+                notifications.notifyStakeholders(fileId,
+                        "apr:" + id + ":a" + mapper.countActivity(id) + ":stale", "요청 무효화",
                         "문서가 변경되어 승인 요청이 무효화되었습니다. 최신 버전으로 다시 요청해 주십시오.", actorId);
                 return getState(fileId);
             }
@@ -294,7 +302,9 @@ public class ApprovalService {
         // 9.6 상태 전이: 승인→APPROVED, 반려→DRAFT (워크플로 경로 — 소유권 검사 없음이 정당)
         lifecycle.changeStatusAsWorkflow(fileId, actorId,
                 finalApproved ? "APPROVED" : "DRAFT", summary);
-        notifications.notifyStakeholders(fileId, finalApproved ? "승인됨" : "반려됨",
+        notifications.notifyStakeholders(fileId,
+                "apr:" + id + ":a" + mapper.countActivity(id) + ":closed",
+                finalApproved ? "승인됨" : "반려됨",
                 summary + " — 마지막 판정: " + actorLabel, actorId);
         return getState(fileId);
     }
@@ -375,7 +385,8 @@ public class ApprovalService {
                 ? actorId : effectiveApprover + " (대리: " + actorId + ")";
         mapper.insertActivity(id, actorId, "RETRACTED",
                 (c == null ? "" : c + " ") + "[" + effectiveApprover + " 판정 번복]", now);
-        notifications.notifyStakeholders(fileId, "판정 번복",
+        notifications.notifyStakeholders(fileId,
+                "apr:" + id + ":a" + mapper.countActivity(id) + ":retract", "판정 번복",
                 actorLabel + "님이 판정을 번복했습니다. 해당 승인자는 다시 판정 대기 상태입니다.", actorId);
         return getState(fileId);
     }
@@ -404,7 +415,8 @@ public class ApprovalService {
         // 이미 이뤄진 개인 판정 기록은 CANCELLED 요청 아래 그대로 보존(감사 추적)
         mapper.insertActivity(id, actorId, "CANCELLED", c, now);
         lifecycle.changeStatusAsWorkflow(fileId, actorId, "DRAFT", c);
-        notifications.notifyStakeholders(fileId, "요청 취소",
+        notifications.notifyStakeholders(fileId,
+                "apr:" + id + ":a" + mapper.countActivity(id) + ":cancel", "요청 취소",
                 actorId + "님이 승인 요청을 취소했습니다.", actorId);
         return getState(fileId);
     }

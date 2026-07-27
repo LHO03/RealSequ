@@ -32,6 +32,13 @@ public interface LifecycleMapper {
                             @Param("reason") String reason,
                             @Param("changedAt") long changedAt);
 
+    /**
+     * P1d: 이 문서에 지금까지 쌓인 상태 이력 건수. insertStatusHistory 직후 호출하면
+     * 방금 넣은 행의 일련번호가 된다(상태 변경은 findStatusForUpdate 잠금으로 직렬화).
+     * 알림 중복 방지 키의 사건 식별자로 쓴다.
+     */
+    int countStatusHistory(@Param("fileId") String fileId);
+
     /** 상태 변경 이력 목록 (최신순). */
     List<Map<String, Object>> listStatusHistory(@Param("fileId") String fileId);
 }

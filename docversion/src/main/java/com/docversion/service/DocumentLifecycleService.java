@@ -133,7 +133,10 @@ public class DocumentLifecycleService {
         mapper.insertStatusHistory(fileId, current.name(), target.name(), userId,
                 (reason == null || reason.isBlank()) ? null : reason.trim(), now);
         // RD-SRS-9.9: 같은 트랜잭션에서 이해관계자에게 알림 + 아웃박스 적재
-        notifications.notifyStakeholders(fileId, "상태 변경",
+        // P1d: 사건 식별자 = 방금 넣은 상태 이력 행의 일련번호. 같은 전이(예: 검토중→초안)가
+        //   여러 번 반복돼도 매번 다른 번호가 나오므로 뒤엣것이 삼켜지지 않는다.
+        int histSeq = mapper.countStatusHistory(fileId);
+        notifications.notifyStakeholders(fileId, "st:" + fileId + ":h" + histSeq, "상태 변경",
                 "문서 상태가 '" + current.label() + "' \u2192 '" + target.label() + "'(으)로 변경되었습니다.", userId);
         return view(target);
     }

@@ -77,6 +77,13 @@ public interface ApprovalMapper {
                        @Param("timestamp") long timestamp);
 
     /**
+     * P1d: 이 요청에 지금까지 쌓인 이력 건수. insertActivity 직후 호출하면
+     * 방금 넣은 행의 일련번호가 된다(요청 단위 동작은 문서 행 잠금으로 직렬화되므로 안전).
+     * 알림 중복 방지 키의 사건 식별자로 쓴다.
+     */
+    int countActivity(@Param("requestId") String requestId);
+
+    /**
      * 문서의 승인 요청 이력 목록(최신순). 승인 현황 요약 포함:
      * approvedCount / rejectedCount / totalApprovers (자식 테이블 집계).
      */

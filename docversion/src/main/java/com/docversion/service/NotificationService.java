@@ -42,34 +42,57 @@ public class NotificationService {
     /**
      * 파일의 구독자(이해관계자)에게 알림. 호출자의 트랜잭션 안에서 실행되어야 한다.
      * actorId(행위 당사자)는 자기 자신에게 알림이 가지 않도록 제외한다.
+     *
+     * @param eventKey 이 알림을 낳은 <b>사건</b>의 식별자. 중복 방지 키의 근간이므로
+     *                 서로 다른 사건이면 반드시 달라야 한다. {@link #enqueueFor} 설명 참고.
      */
-    public void notifyStakeholders(String fileId, String subject, String message, String actorId) {
+    public void notifyStakeholders(String fileId, String eventKey, String subject, String message, String actorId) {
         long now = Instant.now().getEpochSecond();
         List<String> subscribers = mapper.listSubscribers(fileId);
         for (String u : subscribers) {
             if (u == null || u.equals(actorId)) {
                 continue;
             }
-            enqueueFor(u, fileId, subject, message, now);
+            enqueueFor(u, fileId, eventKey, subject, message, now);
         }
     }
 
     /**
      * 특정 사용자 1명에게 알림 (4-B 순차 결재의 "당신 차례" 등 대상 지정 알림).
      * 브로드캐스트(notifyStakeholders)와 동일한 중복 방지·동일 트랜잭션·이메일 적재를 공유한다.
+     *
+     * @param eventKey 사건 식별자. 같은 사건에서 브로드캐스트와 대상 지정 알림이 함께 나갈 때는
+     *                 종류를 덧붙여 구분한다(예: {@code ...:req} vs {@code ...:turn}).
+     *                 그러지 않으면 두 알림이 같은 키가 되어 뒤엣것이 삼켜진다.
      */
-    public void notifyUser(String userId, String fileId, String subject, String message) {
+    public void notifyUser(String userId, String fileId, String eventKey, String subject, String message) {
         if (userId == null || userId.isBlank()) {
             return;
         }
-        enqueueFor(userId.trim(), fileId, subject, message, Instant.now().getEpochSecond());
+        enqueueFor(userId.trim(), fileId, eventKey, subject, message, Instant.now().getEpochSecond());
     }
 
-    /** 알림 1건 적재 공통부: 인앱 + 아웃박스(WEB, 이메일 있으면 EMAIL). 호출자 트랜잭션에 합류. */
-    private void enqueueFor(String u, String fileId, String subject, String message, long now) {
-        long bucket = now / 300; // 5분 윈도우 — 동일 이벤트 중복 알림 방지
+    /**
+     * 알림 1건 적재 공통부: 인앱 + 아웃박스(WEB, 이메일 있으면 EMAIL). 호출자 트랜잭션에 합류.
+     *
+     * <p><b>P1d — 중복 방지 키를 시간이 아니라 사건으로.</b>
+     * 과거에는 {@code 제목 + 파일 + 수신자 + (현재시각/300초)}를 키로 썼다. 5분이라는 시간 구간으로
+     * 같은 사건을 판정한 것인데, 이는 <i>같은 제목의 서로 다른 사건</i>을 동일 사건으로 오인한다.
+     * 예를 들어 5분 안에 문서를 두 번 수정하면 두 번째 "새 버전" 알림이 조용히 사라졌다.
+     * 반대로 5분 경계를 넘기면 진짜 중복도 통과했다 — 어느 쪽으로도 부정확했다.
+     *
+     * <p>이제는 호출부가 사건 식별자를 명시적으로 넘긴다. 최종 키는 {@code eventKey + ":" + 수신자}로,
+     * 수신자마다 한 행이 필요하므로 수신자를 포함한다. 사건 식별자는 이미 적재되는 이력 행
+     * (승인은 {@code approval_activity}, 상태는 {@code document_status_history})의 일련번호를 쓴다.
+     * 이력 행은 사건 하나당 하나씩 생기므로 사건과 정확히 일대일이며, 판정 번복 후 재판정처럼
+     * "같은 사람이 같은 행위를 반복"하는 경우에도 서로 다른 키가 나온다.
+     *
+     * <p>시각(초)을 식별자에 섞지 않은 이유: 같은 초 안에 두 사건이 일어날 수 있고, 그러면
+     * 뒤엣것이 유실된다. 버전 목록 정렬에서 이미 같은 함정을 겪었으므로 같은 실수를 반복하지 않는다.
+     */
+    private void enqueueFor(String u, String fileId, String eventKey, String subject, String message, long now) {
         String notifId = uuid.newId();
-        String dedupKey = subject + ":" + fileId + ":" + u + ":" + bucket;
+        String dedupKey = eventKey + ":" + u;
         int inserted = mapper.insertNotificationIgnore(
                 notifId, u, now, "document", fileId, subject, message, dedupKey);
         if (inserted == 1) {

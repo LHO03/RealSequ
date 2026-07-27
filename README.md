@@ -1,108 +1,73 @@
-# DocumentVersionWorkflowAPI — 알파 시연 데모
+# DocumentWorkflowAPI
 
-박사님 알파 테스트 시연용 Java Spring Boot 버전. 의사코드(`DocumentVersionWorkflowAPI.cpp`, 3,497줄)의 **시나리오 1만** 동작하도록 이식.
+Nextcloud 기반 문서 관리 시스템의 **문서 형상관리 모듈** (RD-SRS-9.x).
 
-## 시연 시나리오 (보고서 7.2.1)
+C++ 의사코드로 업무 규칙을 확정한 뒤, 이를 Java(Spring Boot)로 전환하는 방식으로 진행한다.
+이 저장소에는 **양쪽이 함께** 있으며 역할이 다르다.
+
+---
+
+## 구성
 
 ```
-사용자 A(alice)         사용자 B(bob)
-   │
-   ├─ 파일 업로드 ─────────────────▶ version_created 알림
-   │
-   ├─ 파일 수정 ───────────────────▶ version_updated 알림
-   │
-   ├─ 승인 요청 (approvers=[bob]) ─▶ approval_requested 알림 (bob에게)
-   │                                  │
-   │                                  ├─ 알림 확인
-   │                                  │
-   │                                  ├─ 승인 결정
-   │                                  ▼
-   ◀── approval_completed 알림 (alice에게)
+DocumentWorkflowAPI/
+├── DocumentVersionWorkflowAPI.cpp    C++ 의사코드 — 업무 규칙 정본
+├── Diffservice.h                     diff 계산 명세
+├── Schema.sql                        C++ 단계 스키마 (19개 테이블)
+├── Review_notes.md                   05/14 의사코드 전수 검토 기록
+└── docversion/                       Java 구현체 ← 현재 개발 대상
 ```
 
-## 빠른 시작
+| 항목 | 역할 |
+|---|---|
+| **C++ 의사코드** | 업무 규칙의 **정본**. 순수 로직 결함은 여기서 먼저 고친다 |
+| **`docversion/`** | 실행 가능한 구현체. 트랜잭션·이벤트·인프라 계층을 담당 |
+| **`Review_notes.md`** | 의사코드 검토 이력. 미해결 항목이 남아 있어 참고 가치가 있다 |
+
+---
+
+## 개발 원칙
+
+**업무 규칙은 C++ 단계에서 확정한다.** Java로 옮기는 것은 트랜잭션 관리, 이벤트 처리 같은
+인프라 계층이다. 순수한 업무 규칙에 결함이 발견되면 C++ 단계에서 먼저 수정한다.
+
+양쪽에서 각각 고치면 어느 쪽이 기준인지 알 수 없게 되기 때문이다.
+
+---
+
+## 실행
+
+구현체는 `docversion/` 안에 있다. 호스트에 Docker만 있으면 된다.
 
 ```bash
-# 0. (최초 1회) Gradle Wrapper 생성 — Gradle 8.x 설치되어 있어야 함
-gradle wrapper --gradle-version 8.5
-
-# 1. DB 시작
-docker-compose up -d
-
-# 2. 애플리케이션 실행 (별도 터미널)
-./gradlew bootRun
-
-# 3. Postman 컬렉션 import 후 1번부터 순서대로 실행
-#    postman/DocVer-Demo-Scenario1.postman_collection.json
+cd docversion
+docker compose up --build
 ```
 
-DB 직접 조회: <http://localhost:8081> (Adminer, user=docver/pw=docver_pw/db=docver)
+- 앱 <http://localhost:8080> — API 서버 및 콘솔 화면
+- Adminer <http://localhost:8081> — DB 조회
+- MailHog <http://localhost:8025> — 알림 메일 확인
 
-빌드 환경 확인:
-- Java 17 이상 (`java -version`)
-- Gradle 8.5 이상 (`gradle -v`)
-- Docker + docker-compose
+**상세한 실행법·API 목록·설계 요점·테스트 방법은 [docversion/README.md](docversion/README.md)를 참고한다.**
 
-## 이식 범위
+---
 
-### 포함
+## 진행 상황
 
-| 의사코드 메서드 | Java 위치 | 비고 |
-|---|---|---|
-| `createInitialVersion` | `DocumentVersionService.createInitialVersion` | 동일 동작 |
-| `onDocumentModified` | `DocumentVersionService.updateDocument` | DiffService 제외 |
-| `setDocumentStatus` | `DocumentVersionService.updateStatus` (private) | 매트릭스 동일 |
-| `processApprovalWorkflow` REQUEST | `DocumentVersionService.requestApproval` | THRESHOLD+1 고정 |
-| `processApprovalWorkflow` APPROVE/REJECT + `processApprovalDecision` | `DocumentVersionService.decideApproval` | 위임/SEQUENTIAL 제외 |
-| `notifyStakeholders` | `NotificationService.notifyStakeholders` | Outbox 제외 |
-| `getDefaultStakeholders` | `NotificationService.getDefaultStakeholders` (private) | 이벤트 4종만 분기 |
-| `getUserNotifications` / `markNotificationRead` / `getUnreadCount` | `NotificationController` 엔드포인트 | 동일 |
+| 범위 | 상태 |
+|---|---|
+| RD-SRS-9.1 ~ 9.10 | 구현 완료 |
+| 스키마 (Flyway) | V13까지 적용 |
+| 인증·인가 | Spring Security, 기본 거부 방식 |
+| 검증 | 통합 76건 + JUnit 25건 전부 통과 |
 
-### 의도적으로 제외 (Java 전환 차후 단계)
+> RD-SRS-9.8은 명세서상 존재하지 않는다 (9.7 다음이 9.9).
 
-- 합의 모델 다중 지원 (UNANIMOUS, SEQUENTIAL)
-- 승인 위임 (`createDelegation`, `getActiveDelegatorsOf`)
-- 매트릭스 우회 (`restoreFromDeprecated`, `revertApprovedToDraft`)
-- 보존 정책 cascade + CRUD
-- Outbox 패턴 + 백그라운드 잡
-- DiffService 본체 + 6개 포맷 텍스트 추출
-- CANCEL 액션
-- 구독 관리
+잔여 과제는 `docversion/README.md`의 「알려진 제약 · 잔여 과제」 절에 정리되어 있다.
 
-→ 의사코드 전체 검토 보고서의 (1)/(2) 유형 항목 그대로
+---
 
-## 의사코드 검토 단계 수정 반영
+## 이력
 
-박사님께 보고드린 의사코드 검토(05/14) 중 다음 11건이 본 Java 코드에 반영됨:
-
-1. **이벤트 타입 의미 오류**: `onDocumentModified` 자동 트리거를 `version_updated`로 (의사코드 #1과 동일)
-2. **Outbox 우회**: APPROVE 요청자 알림을 `notifyStakeholders`로 통일 (#4와 동일)
-3. **트랜잭션**: `@Transactional` 명시 (의사코드 line 323 "트랜잭션 처리 문제" 해소)
-
-## 기술 스택
-
-- Spring Boot 3.2.5
-- Java 17
-- JdbcTemplate (JPA 미사용 — 의사코드와 SQL 1:1 매핑 유지)
-- MariaDB 10.11 LTS
-- Lombok
-
-## 디렉터리 구조
-
-```
-src/main/java/com/example/docver/
-├── DocumentVersionDemoApplication.java
-├── controller/      # REST 엔드포인트 (2개)
-├── service/         # 비즈니스 로직 (2개)
-├── repository/      # JdbcTemplate 기반 DB 접근 (5개)
-├── model/           # 도메인 객체
-├── dto/             # API 요청 DTO
-├── exception/       # WorkflowException + GlobalExceptionHandler
-└── config/          # (예약)
-
-src/main/resources/
-├── application.yml
-└── db/
-    ├── schema.sql   # 9개 테이블 자동 생성
-    └── seed.sql     # 상태 태그 초기 등록
-```
+- **05/14** — C++ 의사코드 전수 검토. 11건 수정, 5건은 정책 확인 대기 (`Review_notes.md`)
+- **07월** — Java 전환 및 P1 결함 정리 (MIME 전달, 예외 분류, diff 상태 기계, 정렬, 알림 중복 키)

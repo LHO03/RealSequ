@@ -134,9 +134,12 @@ public class VersionWriteService {
 
         // RD-SRS-9.9 / 목표 간극(가): 새 버전 업로드를 이해관계자(구독자)에게 알림.
         // 버전 기록과 같은 트랜잭션으로 적재 — 커밋되면 알림도 반드시 함께 확정된다.
-        // notifyStakeholders가 행위자(업로더 본인)는 제외하고, 5분 윈도우로 중복도 막는다.
+        // notifyStakeholders가 행위자(업로더 본인)는 제외한다.
         // (최초 업로드는 이 시점에 구독자가 없어 알림 대상이 없으므로 수정본 경로에만 둔다.)
-        notifications.notifyStakeholders(newVersion.getFileId(), "새 버전",
+        // P1d: 사건 식별자 = 새 버전 ID. 버전은 한 번만 만들어지므로 그 자체로 사건과 일대일이다.
+        //   (과거 5분 시간 구간 방식에서는 5분 안에 두 번 수정하면 둘째 알림이 유실됐다.)
+        notifications.notifyStakeholders(newVersion.getFileId(),
+                "ver:" + newVersion.getVersionId(), "새 버전",
                 "새 버전 v" + newRevisionNo + "이(가) 업로드되었습니다.", newVersion.getUserId());
 
         return new ModifyResult(previousVersionId, previousRevisionNo, newRevisionNo,

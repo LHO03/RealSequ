@@ -1,3 +1,20 @@
+# ============================================================
+# DocumentWorkflowAPI
+#   루트: C++ 의사코드(업무 규칙 정본) + Schema.sql
+#   docversion/: Java(Spring Boot) 구현체
+# ============================================================
+
+# ── 인증·세션 파일 (저장소에 절대 올리지 않는다) ──────────────
+# curl -c 로 생성되는 쿠키 항아리, 토큰, 로컬 자격 증명 등
+ck.txt
+*.cookie
+cookie*.txt
+*.pem
+*.key
+.env
+.env.local
+
+# ── C++ 빌드 산출물 ──────────────────────────────────────────
 # Prerequisites
 *.d
 
@@ -37,13 +54,27 @@
 *.out
 *.app
 
-# debug information files
+# Debug information files
 *.dwo
 
-<<<<<<< HEAD
-#
-target/
-=======
-**/.gradle/
+# ── Java / Maven 빌드 산출물 ─────────────────────────────────
 **/target/
->>>>>>> 632418d (update)
+*.class
+
+# ── IDE ──────────────────────────────────────────────────────
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+nbproject/
+
+# ── OS ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── 로컬 실행 데이터 ─────────────────────────────────────────
+# docker compose 볼륨이 아닌 로컬 실행 시 생성되는 파일 저장소
+storage/
