@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.docversion.mapper.FilesVersionMapper">
+
+    <resultMap id="versionInfoMap" type="com.docversion.domain.VersionInfo">
+        <id     property="versionId"  column="version_id"/>
+        <result property="fileId"     column="file_id"/>
+        <result property="revisionNo" column="revision_no"/>
+        <result property="userId"     column="user_id"/>
+        <result property="timestamp"  column="timestamp"/>
+        <result property="size"       column="size"/>
+        <result property="mimetype"   column="mimetype"/>
+        <result property="storageKey" column="storage_key"/>
+        <result property="metadata"   column="metadata"/>
+    </resultMap>
+
+    <!-- createInitialVersion / onDocumentModified: 버전 INSERT.
+         UNIQUE(file_id, revision_no)가 중복 revision_no 최종 방어선. -->
+    <insert id="insertVersion" parameterType="com.docversion.domain.VersionInfo">
+        INSERT INTO files_versions
+            (version_id, file_id, revision_no, user_id, `timestamp`,
+             size, mimetype, storage_key, metadata)
+        VALUES
+            (#{versionId}, #{fileId}, #{revisionNo}, #{userId}, #{timestamp},
+             #{size}, #{mimetype}, #{storageKey}, #{metadata})
+    </insert>
+
+    <!-- onDocumentModified: 이전 버전 storage_key 조회 -->
+    <select id="selectStorageKey" resultType="string">
+        SELECT storage_key FROM files_versions WHERE version_id = #{versionId} LIMIT 1
+    </select>
+
+    <!-- P1: 이전 버전 MIME 조회 (VersionUpdated의 fromMimeType 정확 전달용). -->
+    <select id="selectMimetype" resultType="string">
+        SELECT mimetype FROM files_versions WHERE version_id = #{versionId} LIMIT 1
+    </select>
+
+    <!-- 08/18 - 추출 텍스트 캐시 (V15 컬럼).
+         버전 하나가 여러 비교에 등장하므로 매번 파싱하면 같은 문서를 두세 번 처리한다.
+         처음 필요할 때 추출해 저장하고 이후에는 읽어 쓴다. -->
+    <select id="selectTextStatus" resultType="string">
+        SELECT text_status FROM files_versions WHERE version_id = #{versionId} LIMIT 1
+    </select>
+
+    <select id="selectTextKey" resultType="string">
+        SELECT text_key FROM files_versions WHERE version_id = #{versionId} LIMIT 1
+    </select>
+
+    <update id="updateTextExtracted">
+        UPDATE files_versions
+           SET text_status = #{status},
+               text_key    = #{textKey},
+               text_chars  = #{textChars},
+               text_error  = NULL
+         WHERE version_id = #{versionId}
+    </update>
+
+    <!-- UNSUPPORTED/FAILED 기록. 이 상태는 "안전"이 아니라 "판정 불가"를 뜻한다. -->
+    <update id="updateTextFailed">
+        UPDATE files_versions
+           SET text_status = #{status},
+               text_key    = NULL,
+               text_chars  = NULL,
+               text_error  = #{error}
+         WHERE version_id = #{versionId}
+    </update>
+
+    <!-- getVersionsAtTime 1차: targetTimestamp 이하, 최신순, 페이지네이션.
+         `timestamp`는 예약어 → 백틱. -->
+    <select id="findAtOrBeforeTimestamp" resultMap="versionInfoMap">
+        SELECT version_id, file_id, revision_no, user_id, `timestamp`,
+               size, mimetype, storage_key, metadata
+        FROM files_versions
+        WHERE file_id = #{fileId} AND `timestamp` &lt;= #{targetTimestamp}
+        ORDER BY `timestamp` DESC, revision_no DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- getVersionsAtTime fallback: 이하 버전이 없을 때 이후 가장 오래된 1건 -->
+    <select id="findEarliestAfterTimestamp" resultMap="versionInfoMap">
+        SELECT version_id, file_id, revision_no, user_id, `timestamp`,
+               size, mimetype, storage_key, metadata
+        FROM files_versions
+        WHERE file_id = #{fileId} AND `timestamp` &gt; #{targetTimestamp}
+        ORDER BY `timestamp` ASC, revision_no ASC
+        LIMIT 1
+    </select>
+
+    <!-- logDocumentChangeHistory: 변경 이유 metadata 갱신 (MariaDB JSON_SET).
+         metadata가 NULL일 수 있으므로 COALESCE로 빈 객체 보정. -->
+    <update id="setMetadataReason">
+        UPDATE files_versions
+        SET metadata = JSON_SET(COALESCE(metadata, '{}'), '$.reason', #{reason})
+        WHERE version_id = #{versionId}
+    </update>
+
+
+    <!-- 07/12 - RD-SRS-9.5 열람: 버전 콘텐츠 응답용 메타 단건.
+         file_id를 함께 반환해 "요청 경로의 문서에 속한 버전인지"를 서비스가 대조한다. -->
+    <select id="findVersionForContent" resultType="map">
+        SELECT version_id AS versionId, file_id AS fileId, revision_no AS revisionNo,
+               storage_key AS storageKey, mimetype, size
+        FROM files_versions
+        WHERE version_id = #{versionId}
+    </select>
+
+</mapper>

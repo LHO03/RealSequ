@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.docversion</groupId>
+        <artifactId>docversion</artifactId>
+        <version>0.1.0-alpha</version>
+    </parent>
+
+    <artifactId>dlp-core</artifactId>
+    <name>dlp-core</name>
+    <description>RD-SRS-5.x 민감 데이터 탐지 엔진 (5.1 저장 문서 판별 / 5.2 변경분 판별 / 5.4 유형별 식별)</description>
+
+    <!--
+      08/17 - 이 모듈은 의존성을 갖지 않는다. 의도적인 제약이며 다음을 보장한다.
+
+        1) 9.x 데이터 접근 계층을 호출할 수단이 없다.
+           규칙 조회와 결과 저장은 전적으로 docversion-app이 담당하고,
+           이 모듈은 주입받은 규칙으로 텍스트를 검사해 결과를 돌려주기만 한다.
+        2) Spring 문맥 없이 단위 시험이 가능하다.
+           선행 산출물(문서중앙화_5)은 규칙 적재 계층 부재로 컴파일조차 되지 않았는데,
+           그 계층을 이 모듈 밖으로 밀어낸 것이 재발 방지책이다.
+        3) 향후 별도 서비스로 분리할 때 그대로 떼어낼 수 있다.
+           6.x 모델 연동 시 원격 구현체로 교체하는 경로를 닫지 않는다.
+
+      시험 라이브러리(JUnit)는 예외로 둔다. 운영 산출물에는 포함되지 않는다.
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

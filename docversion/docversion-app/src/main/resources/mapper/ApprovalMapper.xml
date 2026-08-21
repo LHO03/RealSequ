@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.docversion.mapper.ApprovalMapper">
+
+    <!-- 승인 요청 생성 (V8 다중): OPEN + open_marker=file_id + mode.
+         같은 문서에 OPEN이 이미 있으면 uq_open_per_file 위반으로 INSERT 실패(예외).
+         approver_id(레거시)는 채우지 않는다 — 승인자는 자식 테이블에. -->
+    <insert id="insertRequest">
+        INSERT INTO approval_requests
+            (id, file_id, requester_id, mode, status, open_marker, target_version_id, created_at)
+        VALUES
+            (#{id}, #{fileId}, #{requesterId}, #{mode}, 'OPEN', #{fileId}, #{targetVersionId}, #{createdAt})
+    </insert>
+
+    <!-- 요청의 승인자 등록 (같은 요청에 같은 승인자는 uq_request_approver로 차단) -->
+    <insert id="insertRequestApprover">
+        INSERT INTO approval_request_approvers (request_id, approver_id, seq)
+        VALUES (#{requestId}, #{approverId}, #{seq})
+    </insert>
+
+    <!-- 문서의 현재 OPEN 요청 -->
+    <select id="findOpenByFile" resultType="map">
+        SELECT id, file_id AS fileId, requester_id AS requesterId,
+               mode, status, target_version_id AS targetVersionId, created_at AS createdAt
+        FROM approval_requests
+        WHERE file_id = #{fileId} AND status = 'OPEN'
+        LIMIT 1
+    </select>
+
+    <!-- 07/12 - C-1: OPEN 요청 행 잠금 조회. 판정(decide)·번복(retract)·취소(cancel)가
+         이 잠금으로 직렬화되어, "각자 상대를 PENDING으로 본 스냅샷 집계" 때문에
+         요청이 영구 미확정으로 남는 동시성 결함을 차단한다.
+         잠금 순서 규약: documents 행을 먼저 잠근 뒤 호출할 것. -->
+    <select id="findOpenByFileForUpdate" resultType="map">
+        SELECT id, file_id AS fileId, requester_id AS requesterId,
+               mode, status, target_version_id AS targetVersionId, created_at AS createdAt
+        FROM approval_requests
+        WHERE file_id = #{fileId} AND status = 'OPEN'
+        LIMIT 1
+        FOR UPDATE
+    </select>
+
+    <!-- 요청의 승인자 목록 (순번 오름차순) -->
+    <select id="listApprovers" resultType="map">
+        SELECT approver_id AS approverId, seq,
+               decision, decided_at AS decidedAt,
+               comment, acted_by AS actedBy
+        FROM approval_request_approvers
+        WHERE request_id = #{requestId}
+        ORDER BY seq ASC, id ASC
+    </select>
+
+    <!-- 승인자 개인 판정: PENDING인 본인 행만 (0행이면 이미 판정했거나 대상 아님) -->
+    <update id="decideApprover">
+        UPDATE approval_request_approvers
+        SET decision = #{decision},
+            decided_at = #{decidedAt},
+            comment = #{comment},
+            acted_by = #{actedBy}
+        WHERE request_id = #{requestId}
+          AND approver_id = #{approverId}
+          AND decision = 'PENDING'
+    </update>
+
+    <!-- 요청 닫기(최종 판정): OPEN인 것만. open_marker를 NULL로 풀어 다음 요청 허용. -->
+    <update id="closeRequest">
+        UPDATE approval_requests
+        SET status = #{status},
+            open_marker = NULL,
+            decided_at = #{decidedAt}
+        WHERE id = #{id} AND status = 'OPEN'
+    </update>
+
+    <!-- 판정 번복 (4-D): 요청이 여전히 OPEN일 때만 해당 승인자 판정을 PENDING으로.
+         (JOIN 조건이 확정과의 동시 경합을 차단 — 확정된 요청은 0행) -->
+    <update id="retractApprover">
+        UPDATE approval_request_approvers a
+        JOIN approval_requests r ON r.id = a.request_id
+        SET a.decision = 'PENDING',
+            a.decided_at = NULL,
+            a.comment = NULL,
+            a.acted_by = NULL
+        WHERE a.request_id = #{requestId}
+          AND a.approver_id = #{approverId}
+          AND a.decision != 'PENDING'
+          AND r.status = 'OPEN'
+    </update>
+
+    <!-- 판정 이력 기록 -->
+    <insert id="insertActivity">
+        INSERT INTO approval_activity
+            (request_id, actor_id, action, comment, `timestamp`)
+        VALUES
+            (#{requestId}, #{actorId}, #{action}, #{comment}, #{timestamp})
+    </insert>
+
+    <!-- P1d: 사건 식별자용 일련번호. insertActivity 직후 호출 = 방금 넣은 행의 순번. -->
+    <select id="countActivity" resultType="int">
+        SELECT COUNT(*) FROM approval_activity WHERE request_id = #{requestId}
+    </select>
+
+    <!-- 문서의 승인 요청 이력(최신순) + 승인 현황 집계 -->
+    <select id="listByFile" resultType="map">
+        SELECT r.id, r.requester_id AS requesterId, r.mode, r.status,
+               r.created_at AS createdAt, r.decided_at AS decidedAt,
+               COALESCE(SUM(a.decision = 'APPROVED'), 0) AS approvedCount,
+               COALESCE(SUM(a.decision = 'REJECTED'), 0) AS rejectedCount,
+               COUNT(a.id) AS totalApprovers,
+               GROUP_CONCAT(a.approver_id ORDER BY a.seq SEPARATOR ', ') AS approverNames
+        FROM approval_requests r
+        LEFT JOIN approval_request_approvers a ON a.request_id = r.id
+        WHERE r.file_id = #{fileId}
+        GROUP BY r.id, r.requester_id, r.mode, r.status, r.created_at, r.decided_at
+        ORDER BY r.created_at DESC, r.id DESC
+    </select>
+
+</mapper>
