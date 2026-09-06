@@ -1,0 +1,64 @@
+﻿file,doc_id,format,title,group,truth,engine_predicts,engine_score,engine_hits,agrees,note
+A01_hr-record.txt,A01,txt,인사기록카드,진양성,SENSITIVE,SENSITIVE,100,SSNx1,Y,주민등록번호 1건(체크섬 통과). 단일 항목만으로 임계값을 넘는 대표 사례
+A01_hr-record.docx,A01,docx,인사기록카드,진양성,SENSITIVE,SENSITIVE,100,SSNx1,Y,주민등록번호 1건(체크섬 통과). 단일 항목만으로 임계값을 넘는 대표 사례
+A01_hr-record.pdf,A01,pdf,인사기록카드,진양성,SENSITIVE,SENSITIVE,100,SSNx1,Y,주민등록번호 1건(체크섬 통과). 단일 항목만으로 임계값을 넘는 대표 사례
+A02_job-application.txt,A02,txt,채용지원서 사본,진양성,SENSITIVE,SENSITIVE,60,SSNx1,Y,주민등록번호 형식만 맞고 체크섬 불통과 → 60점. 오타 섞인 실제 번호를 놓치지 않는지
+A03_corp-card.txt,A03,txt,법인카드 사용내역,진양성,SENSITIVE,SENSITIVE,100,CREDIT_CARDx1,Y,"Visa 16자리, Luhn 통과 → 100점"
+A03_corp-card.docx,A03,docx,법인카드 사용내역,진양성,SENSITIVE,SENSITIVE,100,CREDIT_CARDx1,Y,"Visa 16자리, Luhn 통과 → 100점"
+A03_corp-card.pdf,A03,pdf,법인카드 사용내역,진양성,SENSITIVE,SENSITIVE,100,CREDIT_CARDx1,Y,"Visa 16자리, Luhn 통과 → 100점"
+A04_payroll-transfer.txt,A04,txt,급여이체 요청서,진양성,SENSITIVE,SENSITIVE,80,BANK_ACCOUNTx1,Y,계좌번호 + 은행명 문맥 → 80점. 문맥 조건이 제대로 작동하는지
+A04_payroll-transfer.docx,A04,docx,급여이체 요청서,진양성,SENSITIVE,SENSITIVE,80,BANK_ACCOUNTx1,Y,계좌번호 + 은행명 문맥 → 80점. 문맥 조건이 제대로 작동하는지
+A04_payroll-transfer.pdf,A04,pdf,급여이체 요청서,진양성,SENSITIVE,SENSITIVE,80,BANK_ACCOUNTx1,Y,계좌번호 + 은행명 문맥 → 80점. 문맥 조건이 제대로 작동하는지
+A05_contact-list.txt,A05,txt,비상연락망,진양성,SENSITIVE,SENSITIVE,60,PHONEx3,Y,휴대전화 3건 = 60점. 단독으로는 임계값 미달인 항목이 누적으로 넘는 사례
+A05_contact-list.docx,A05,docx,비상연락망,진양성,SENSITIVE,SENSITIVE,60,PHONEx3,Y,휴대전화 3건 = 60점. 단독으로는 임계값 미달인 항목이 누적으로 넘는 사례
+A05_contact-list.pdf,A05,pdf,비상연락망,진양성,SENSITIVE,SENSITIVE,60,PHONEx3,Y,휴대전화 3건 = 60점. 단독으로는 임계값 미달인 항목이 누적으로 넘는 사례
+A06_newsletter-list.txt,A06,txt,뉴스레터 수신자 명단,진양성,SENSITIVE,SENSITIVE,50,EMAILx5,Y,"이메일 5건 = 정확히 50점, 임계값과 같다. 경계값 동작 확인 (F14)"
+A07_severance-notice.txt,A07,txt,퇴직정산 통지서,진양성,SENSITIVE,SENSITIVE,210,BANK_ACCOUNTx1 EMAILx1 PHONEx1 SSNx1,Y,주민번호 + 계좌 + 전화 + 이메일 복합. 실무 문서에 가장 가까운 형태
+A07_severance-notice.docx,A07,docx,퇴직정산 통지서,진양성,SENSITIVE,SENSITIVE,210,BANK_ACCOUNTx1 EMAILx1 PHONEx1 SSNx1,Y,주민번호 + 계좌 + 전화 + 이메일 복합. 실무 문서에 가장 가까운 형태
+A07_severance-notice.pdf,A07,pdf,퇴직정산 통지서,진양성,SENSITIVE,SENSITIVE,210,BANK_ACCOUNTx1 EMAILx1 PHONEx1 SSNx1,Y,주민번호 + 계좌 + 전화 + 이메일 복합. 실무 문서에 가장 가까운 형태
+B01_weekly-minutes.txt,B01,txt,주간 회의록,진음성,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,숫자가 거의 없는 일반 업무 문서. 기본 오탐 없음 확인
+B01_weekly-minutes.docx,B01,docx,주간 회의록,진음성,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,숫자가 거의 없는 일반 업무 문서. 기본 오탐 없음 확인
+B01_weekly-minutes.pdf,B01,pdf,주간 회의록,진음성,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,숫자가 거의 없는 일반 업무 문서. 기본 오탐 없음 확인
+B02_server-notes.txt,B02,txt,서버 구성 메모,진음성,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,버전 번호·포트 번호·IP가 많은 기술 문서. 숫자 밀집 오탐 확인
+B02_server-notes.docx,B02,docx,서버 구성 메모,진음성,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,버전 번호·포트 번호·IP가 많은 기술 문서. 숫자 밀집 오탐 확인
+B02_server-notes.pdf,B02,pdf,서버 구성 메모,진음성,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,버전 번호·포트 번호·IP가 많은 기술 문서. 숫자 밀집 오탐 확인
+B03_duty-roster.txt,B03,txt,당직 근무표,진음성,NOT_SENSITIVE,NOT_SENSITIVE,40,PHONEx2,Y,휴대전화 2건 = 40점. 임계값 바로 아래인지 확인
+B04_event-notice.txt,B04,txt,행사 안내,진음성,NOT_SENSITIVE,NOT_SENSITIVE,40,EMAILx4,Y,이메일 4건 = 40점. 경계 바로 아래
+B05_event-schedule.txt,B05,txt,행사 일정표,진음성,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,날짜만 있고 거래 어휘가 없다. 문맥 조건이 없을 때 계좌 규칙이 잠잠한지
+B05_event-schedule.docx,B05,docx,행사 일정표,진음성,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,날짜만 있고 거래 어휘가 없다. 문맥 조건이 없을 때 계좌 규칙이 잠잠한지
+B05_event-schedule.pdf,B05,pdf,행사 일정표,진음성,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,날짜만 있고 거래 어휘가 없다. 문맥 조건이 없을 때 계좌 규칙이 잠잠한지
+C01_billing-notice.txt,C01,txt,청구 안내문,함정-오탐,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,F5: 날짜가 계좌번호로 잡힌다. '입금'이 문맥 조건을 통과시킨다
+C01_billing-notice.docx,C01,docx,청구 안내문,함정-오탐,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,F5: 날짜가 계좌번호로 잡힌다. '입금'이 문맥 조건을 통과시킨다
+C01_billing-notice.pdf,C01,pdf,청구 안내문,함정-오탐,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,F5: 날짜가 계좌번호로 잡힌다. '입금'이 문맥 조건을 통과시킨다
+C02_empno-lookup.txt,C02,txt,사번 확인 요청,함정-오탐,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,F5: 사번이 계좌번호로 잡힌다. '예금주'가 문맥 조건을 통과시킨다
+C03_inquiry-memo.txt,C03,txt,문의 접수 메모,함정-오탐,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,F5: 국가번호가 붙은 전화번호가 계좌번호로 잡힌다. V17 전방탐색을 우회한다
+C04_helpdesk-notice.txt,C04,txt,고객센터 안내,함정-오탐,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,F5: 유선 대표번호가 계좌번호로 잡힌다
+C04_helpdesk-notice.docx,C04,docx,고객센터 안내,함정-오탐,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,F5: 유선 대표번호가 계좌번호로 잡힌다
+C04_helpdesk-notice.pdf,C04,pdf,고객센터 안내,함정-오탐,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,F5: 유선 대표번호가 계좌번호로 잡힌다
+C05_tax-invoice.txt,C05,txt,세금계산서 요청,함정-오탐,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,F5: 사업자등록번호가 계좌번호로 잡힌다. 실무에서 가장 흔한 형태
+C05_tax-invoice.docx,C05,docx,세금계산서 요청,함정-오탐,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,F5: 사업자등록번호가 계좌번호로 잡힌다. 실무에서 가장 흔한 형태
+C05_tax-invoice.pdf,C05,pdf,세금계산서 요청,함정-오탐,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,F5: 사업자등록번호가 계좌번호로 잡힌다. 실무에서 가장 흔한 형태
+C06_settlement-memo.txt,C06,txt,정산 요청 메모,함정-오탐,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,"F5 확장: 계좌번호 정규식의 구분자가 공백도 허용해, 무관한 두 숫자열을 공백 너머로 하나로 묶는다. 원래 기록된 오탐 5종에 없던 형태"
+C06_settlement-memo.docx,C06,docx,정산 요청 메모,함정-오탐,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,"F5 확장: 계좌번호 정규식의 구분자가 공백도 허용해, 무관한 두 숫자열을 공백 너머로 하나로 묶는다. 원래 기록된 오탐 5종에 없던 형태"
+C06_settlement-memo.pdf,C06,pdf,정산 요청 메모,함정-오탐,NOT_SENSITIVE,NOT_SENSITIVE,0,,Y,"F5 확장: 계좌번호 정규식의 구분자가 공백도 허용해, 무관한 두 숫자열을 공백 너머로 하나로 묶는다. 원래 기록된 오탐 5종에 없던 형태"
+D01_travel-expense.txt,D01,txt,해외출장 정산,함정-미탐,SENSITIVE,SENSITIVE,100,CREDIT_CARDx1,Y,F11: Amex 15자리. 정규식이 4-4-4-4를 요구해 탐지되지 않는다
+D01_travel-expense.docx,D01,docx,해외출장 정산,함정-미탐,SENSITIVE,SENSITIVE,100,CREDIT_CARDx1,Y,F11: Amex 15자리. 정규식이 4-4-4-4를 요구해 탐지되지 않는다
+D01_travel-expense.pdf,D01,pdf,해외출장 정산,함정-미탐,SENSITIVE,SENSITIVE,100,CREDIT_CARDx1,Y,F11: Amex 15자리. 정규식이 4-4-4-4를 요구해 탐지되지 않는다
+A08_hr-correction.txt,A08,txt,인사 정정 요청,진양성,SENSITIVE,SENSITIVE,100,SSNx1,Y,F8 겹침: 계좌번호 규칙이 앞 숫자와 주민번호 앞부분을 하나로 묶어 구간이 겹친다. 탐지 목록에 SSN이 남아야 한다(BANK_ACCOUNT로 바뀌면 겹침 해소가 위치 기준으로 되돌아간 것)
+A08_hr-correction.docx,A08,docx,인사 정정 요청,진양성,SENSITIVE,SENSITIVE,100,SSNx1,Y,F8 겹침: 계좌번호 규칙이 앞 숫자와 주민번호 앞부분을 하나로 묶어 구간이 겹친다. 탐지 목록에 SSN이 남아야 한다(BANK_ACCOUNT로 바뀌면 겹침 해소가 위치 기준으로 되돌아간 것)
+A08_hr-correction.pdf,A08,pdf,인사 정정 요청,진양성,SENSITIVE,SENSITIVE,100,SSNx1,Y,F8 겹침: 계좌번호 규칙이 앞 숫자와 주민번호 앞부분을 하나로 묶어 구간이 겹친다. 탐지 목록에 SSN이 남아야 한다(BANK_ACCOUNT로 바뀌면 겹침 해소가 위치 기준으로 되돌아간 것)
+A09_nonghyup-transfer.txt,A09,txt,농협 이체 요청,진양성,SENSITIVE,SENSITIVE,80,BANK_ACCOUNTx1,Y,V18로 새로 잡히게 된 형태. 농협식 4묶음 계좌를 온전히 탐지하는지 (종전에는 앞 3묶음만 잘라서 보고했다)
+A09_nonghyup-transfer.docx,A09,docx,농협 이체 요청,진양성,SENSITIVE,SENSITIVE,80,BANK_ACCOUNTx1,Y,V18로 새로 잡히게 된 형태. 농협식 4묶음 계좌를 온전히 탐지하는지 (종전에는 앞 3묶음만 잘라서 보고했다)
+A09_nonghyup-transfer.pdf,A09,pdf,농협 이체 요청,진양성,SENSITIVE,SENSITIVE,80,BANK_ACCOUNTx1,Y,V18로 새로 잡히게 된 형태. 농협식 4묶음 계좌를 온전히 탐지하는지 (종전에는 앞 3묶음만 잘라서 보고했다)
+C07_purchase-order.txt,C07,txt,발주 확인서,함정-오탐,NOT_SENSITIVE,SENSITIVE,80,BANK_ACCOUNTx1,N,"V18 이후 남은 약점: 4묶음 숫자 식별자는 자릿수만으로 농협식 계좌와 구분되지 않는다. 측정으로 확인된 오탐이 아니라 검토 중 떠올린 형태이므로, 규칙을 더 좁히지 않고 여기서 실제로 문제가 되는지 본다"
+C07_purchase-order.docx,C07,docx,발주 확인서,함정-오탐,NOT_SENSITIVE,SENSITIVE,80,BANK_ACCOUNTx1,N,"V18 이후 남은 약점: 4묶음 숫자 식별자는 자릿수만으로 농협식 계좌와 구분되지 않는다. 측정으로 확인된 오탐이 아니라 검토 중 떠올린 형태이므로, 규칙을 더 좁히지 않고 여기서 실제로 문제가 되는지 본다"
+C07_purchase-order.pdf,C07,pdf,발주 확인서,함정-오탐,NOT_SENSITIVE,SENSITIVE,80,BANK_ACCOUNTx1,N,"V18 이후 남은 약점: 4묶음 숫자 식별자는 자릿수만으로 농협식 계좌와 구분되지 않는다. 측정으로 확인된 오탐이 아니라 검토 중 떠올린 형태이므로, 규칙을 더 좁히지 않고 여기서 실제로 문제가 되는지 본다"
+C08_book-order.txt,C08,txt,도서 구입 요청,함정-오탐,NOT_SENSITIVE,SENSITIVE,80,BANK_ACCOUNTx1,N,C07과 같은 갈래. ISBN이 4묶음 숫자라 계좌번호와 형태가 겹친다
+C08_book-order.docx,C08,docx,도서 구입 요청,함정-오탐,NOT_SENSITIVE,SENSITIVE,80,BANK_ACCOUNTx1,N,C07과 같은 갈래. ISBN이 4묶음 숫자라 계좌번호와 형태가 겹친다
+C08_book-order.pdf,C08,pdf,도서 구입 요청,함정-오탐,NOT_SENSITIVE,SENSITIVE,80,BANK_ACCOUNTx1,N,C07과 같은 갈래. ISBN이 4묶음 숫자라 계좌번호와 형태가 겹친다
+D02_legacy-account.txt,D02,txt,구계좌 안내문,함정-미탐,SENSITIVE,NOT_SENSITIVE,0,,N,"V18에서 감수한 대가: 구분자에서 공백을 빼면서 공백으로 적은 계좌번호를 놓친다. 공백 허용이 오탐의 주된 통로였으므로 맞바꾼 것이며, 실제로 문제가 되는지 여기서 잰다"
+D02_legacy-account.docx,D02,docx,구계좌 안내문,함정-미탐,SENSITIVE,NOT_SENSITIVE,0,,N,"V18에서 감수한 대가: 구분자에서 공백을 빼면서 공백으로 적은 계좌번호를 놓친다. 공백 허용이 오탐의 주된 통로였으므로 맞바꾼 것이며, 실제로 문제가 되는지 여기서 잰다"
+D02_legacy-account.pdf,D02,pdf,구계좌 안내문,함정-미탐,SENSITIVE,NOT_SENSITIVE,0,,N,"V18에서 감수한 대가: 구분자에서 공백을 빼면서 공백으로 적은 계좌번호를 놓친다. 공백 허용이 오탐의 주된 통로였으므로 맞바꾼 것이며, 실제로 문제가 되는지 여기서 잰다"
+E01_long-report.txt,E01,txt,장문 보고서,추출경계,SENSITIVE,SENSITIVE,100,SSNx1,Y,본문이 긴 문서 안에 주민번호 1건. 추출과 검사가 문서 끝까지 닿는지
+E01_long-report.docx,E01,docx,장문 보고서,추출경계,SENSITIVE,SENSITIVE,100,SSNx1,Y,본문이 긴 문서 안에 주민번호 1건. 추출과 검사가 문서 끝까지 닿는지
+E01_long-report.pdf,E01,pdf,장문 보고서,추출경계,SENSITIVE,SENSITIVE,100,SSNx1,Y,본문이 긴 문서 안에 주민번호 1건. 추출과 검사가 문서 끝까지 닿는지

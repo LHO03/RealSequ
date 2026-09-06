@@ -1,0 +1,110 @@
+spring:
+  application:
+    name: docversion-core
+
+  # 07/19 - P1-⑤: 기본 활성 프로필 = demo.
+  #   demo에서만 DefaultAccountsInitializer가 데모 계정(alice/bob/admin)을 시드한다.
+  #   운영 배포 시 SPRING_PROFILES_ACTIVE=prod 로 기동하면 데모 계정이 생성되지 않는다.
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:demo}
+
+  # 알림 이메일 발송 (RD-SRS-9.9). 개발/시연은 MailHog(가짜 SMTP) — compose가 host를 mailhog로 덮어씀.
+  mail:
+    host: ${SPRING_MAIL_HOST:localhost}
+    port: ${SPRING_MAIL_PORT:1025}
+
+  # ------------------------------------------------------------
+  # 업로드 크기 상한 (RD-SRS-9.1 · 9.2)
+  #
+  # 이 설정이 없으면 Spring Boot 기본값(파일 1MB / 요청 10MB)이 그대로 적용된다.
+  # 그 상태에서는 평범한 PDF 한 편도 업로드되지 않으며, 거부가 컨트롤러 진입 전
+  # 프레임워크 단계에서 일어나므로 애플리케이션 코드에는 흔적조차 남지 않는다.
+  # (시연과 시험을 평문 텍스트로만 해와서 그동안 드러나지 않았다.)
+  #
+  # 100MB까지 올리지 않는 이유: 현재 업로드 경로는 파일을 통째로 byte[]로 힙에
+  # 적재한다(MultipartFile.getBytes → StorageService.writeFile). 상한만 올리면
+  # 동시 업로드에서 힙이 고갈된다. 스트림 기반 전환이 선행되어야 하며, 그때까지는
+  # 실제 문서가 통과하는 수준으로만 열어 둔다.
+  #
+  # 환경변수로 덮어쓸 수 있다 — 재배포 없이 조정 가능하다.
+  # ------------------------------------------------------------
+  servlet:
+    multipart:
+      max-file-size: ${DOCVERSION_MAX_FILE_SIZE:20MB}
+      max-request-size: ${DOCVERSION_MAX_REQUEST_SIZE:25MB}
+
+  datasource:
+    # 로컬 개발 시: docker로 MariaDB 10.11 띄운 뒤 접속
+    # (Docker 환경: MariaDB + Redis + Nextcloud + Adminer 구성 기준)
+    url: jdbc:mariadb://localhost:3306/nextcloud?useUnicode=true&characterEncoding=utf8mb4
+    username: ${DB_USER:nextcloud}
+    password: ${DB_PASSWORD:nextcloud}
+    driver-class-name: org.mariadb.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      pool-name: docversion-pool
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # Nextcloud DB에 합류하는 형태이므로, 기존 테이블이 있어도 baseline 허용
+    baseline-on-migrate: true
+
+# MyBatis: 코어 SQL 직역 계층
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.docversion.domain
+  configuration:
+    map-underscore-to-camel-case: true   # snake_case 컬럼 → camelCase 필드 자동 매핑
+    default-statement-timeout: 30
+
+logging:
+  level:
+    com.docversion.mapper: debug   # 개발 중 실행 SQL 확인 (parity 대조용)
+
+# 상태 전이 거부 등의 메시지를 응답 본문에 포함 (화면에서 사유 표시용)
+server:
+  error:
+    include-message: always
+  tomcat:
+    # 상한 초과 요청에 깔끔한 413을 돌려주기 위한 설정.
+    #
+    # 상한을 넘긴 요청을 거부한 뒤에도 톰캣은 남은 본문을 읽어 버려야(swallow)
+    # 연결을 재사용할 수 있다. 그 한도가 기본 2MB라, 25MB 상한에 30MB 파일을 보내면
+    # 톰캣이 연결을 끊어 클라이언트는 413이 아니라 "연결이 끊어졌습니다"를 본다.
+    # 원인 파악이 어려운 형태의 실패다.
+    #
+    # 상한보다 넉넉히 잡아 근소한 초과는 413으로 안내하고, 터무니없이 큰 요청은
+    # 그대로 연결을 끊어 자원 낭비를 막는다.
+    max-swallow-size: ${DOCVERSION_MAX_SWALLOW_SIZE:64MB}
+
+docversion:
+  # ------------------------------------------------------------
+  # 버전 비교 규모 한계 (RD-SRS-9.4)
+  #
+  # Myers 알고리즘은 편집 거리에 비례해 메모리를 쓴다. 상한이 없으면 크게 달라진
+  # 두 버전에서 힙을 모두 소진하고, 그 OutOfMemoryError가 작업자를 무한 재시도에
+  # 빠뜨린다. 상한을 넘으면 죽는 대신 해시 비교(HASH_ONLY)로 내려간다.
+  #
+  #   max-total-lines    양쪽 줄 수의 합. 넘으면 줄 단위 비교를 시도하지 않는다.
+  #                      메모리보다 시간을 위한 상한이다(계산량이 줄 수에 비례).
+  #   max-edit-distance  추적할 최대 편집 거리(= 달라진 줄 수의 합).
+  #                      평범한 문서 수정은 수십~수백이므로 닿지 않는다.
+  #
+  # 메모리는 4·(편집거리+1)² 바이트다. 기본 7,000이면 최악 약 196MB이고,
+  # 리뷰에서 OOM이 났던 형태(5만 줄 중 3,000줄 수정, 편집거리 6,000)는 약 144MB로 완주한다.
+  #
+  # 비교가 자주 생략된다면 max-edit-distance를 올린다. 다만 **제곱으로 늘어난다** —
+  # 두 배로 올리면 메모리는 네 배다. 워커가 동시에 여러 건을 처리하지 않는다는 점을
+  # 전제로 잡은 값이므로, 워커를 늘린다면 이 값을 함께 내려야 한다.
+  # ------------------------------------------------------------
+  diff:
+    max-total-lines: ${DOCVERSION_DIFF_MAX_LINES:200000}
+    max-edit-distance: ${DOCVERSION_DIFF_MAX_EDIT_DISTANCE:7000}
+  notify:
+    # false면 EMAIL 아웃박스 적재 자체를 생략(메일 서버 없는 환경) — 인앱(WEB)만 동작
+    email-enabled: ${DOCVERSION_EMAIL_ENABLED:true}
+  upload:
+    # 413 응답 메시지에 실제 상한을 실어 보내기 위한 표시용 값.
+    # spring.servlet.multipart.max-file-size와 같은 값을 유지할 것.
+    max-file-size-label: ${DOCVERSION_MAX_FILE_SIZE:20MB}

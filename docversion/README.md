@@ -1,47 +1,27 @@
-# docversion-core
+# docversion — 5.x DLP와 9.x 문서 형상관리 서버
 
-Nextcloud 기반 문서 관리 시스템의 **문서 형상관리 모듈**.
-선행 C++ 의사코드(`DocumentVersionWorkflowAPI.cpp` / `Diffservice.h` / `Schema.sql`)를
-**Spring Boot 3 + MyBatis + MariaDB**로 전환한 구현체다.
+RD-SRS-5.1·5.2·5.4의 규칙 기반 민감 데이터 판별과 RD-SRS-9.x의 버전·승인·알림·보존 기능을 제공하는 Java 구현체입니다.
+전체 요구사항별 담당 범위와 구현 상태는 [저장소 README](../README.md)를 참고하십시오.
 
-**대상 요구사항**: RD-SRS-9.1 ~ 9.10 (전 범위 구현 완료)
+5.5는 휴리스틱의 한계를 고려하여 인터페이스와 골격만 유지합니다. `HeuristicScanner`는 현재 판정에 참여하지 않습니다.
+5.3은 리얼시큐 Client, 5.6·5.7은 리얼시큐 Web 담당입니다. 문서 내용 승인(9.7)은 외부 반출 승인(5.7)과 별개입니다.
 
-| 항목 | 내용 |
+## 구성과 기술
+
+| 구성 | 역할 |
 |---|---|
-| 9.1 | 최초 버전 생성 |
-| 9.2 | 문서 수정 시 자동 버전 생성 |
-| 9.3 | 변경 이력 (변경자·시각·사유) |
-| 9.4 | 버전 간 diff |
-| 9.5 | 특정 시점 버전 목록 및 콘텐츠 열람 |
-| 9.6 | 문서 상태 관리 |
-| 9.7 | 승인 워크플로 (다중 승인자·위임 포함) |
-| 9.9 | 알림 (인앱 + 이메일) |
-| 9.10 | 보존 정책 |
+| `dlp-core` | Spring 비의존 탐지 API·규칙·검증기·마스킹 및 단위 시험 |
+| `docversion-app` | Spring Boot API, 9.x 서비스, 인증·인가, DB 매퍼와 DLP 연계 |
+| `dlp-eval` | TXT·DOCX·PDF 평가 문서, 정답표, 업로드·판정 측정 스크립트 |
 
-> 9.8은 명세서상 존재하지 않는다 (9.7 다음이 9.9).
+Java 21, Spring Boot 3.3.5, MyBatis 3.0.3, MariaDB 10.11, Apache Tika 2.9.2를 사용합니다.
+의존 방향은 `docversion-app → dlp-core`입니다. 스키마는 Flyway V1~V18로 관리합니다.
+C++ 의사코드는 9.x 선행 업무 설계이며, 실제 실행 구성은 이 디렉터리의 Java 코드와 마이그레이션입니다.
 
----
+## 실행
 
-## 스택
-
-| 구분 | 선택 |
-|---|---|
-| 언어 · 프레임워크 | Java 21, Spring Boot 3.3.5 |
-| 데이터 접근 | MyBatis 3.0.3 — MariaDB 고유 구문(`FOR UPDATE`, `INSERT IGNORE`, `JSON_SET`) 직접 작성 |
-| 데이터베이스 | MariaDB 10.11 LTS |
-| 스키마 관리 | Flyway (현재 V13까지) |
-| 인증 · 인가 | Spring Security 6.3 — 기본 거부(deny-by-default) |
-| 텍스트 추출 | Apache Tika 2.9 (diff 대상 문서 본문 추출) |
-| 테스트 | Testcontainers (실제 MariaDB 기동, H2 미사용) |
-
-**MyBatis를 택한 이유**: 동시 편집·동시 결재 경합 제어가 핵심이라 잠금 구문을 직접 작성하고
-검토해야 한다. SQL이 자동 생성되면 검토가 어렵다.
-
----
-
-## 실행 (Docker만 필요)
-
-호스트에 Docker만 있으면 된다. Java·Maven·IDE 불필요 — 앱은 컨테이너 안에서 빌드된다.
+이 디렉터리에서 실행합니다. 호스트에는 Docker Engine과 Compose가 필요합니다.
+Compose 구성은 Nextcloud 미연동 독립 실행이며, MariaDB·앱·Adminer·MailHog를 기동합니다.
 
 ```bash
 docker compose up --build
@@ -49,18 +29,11 @@ docker compose up --build
 
 | 서비스 | 주소 | 용도 |
 |---|---|---|
-| app | http://localhost:8080 | API 서버 · 콘솔 화면 |
-| Adminer | http://localhost:8081 | DB 조회 (Server `mariadb`, 계정 `nextcloud`/`nextcloud`) |
-| MailHog | http://localhost:8025 | 발송된 알림 메일 확인 |
-| MariaDB | localhost:3306 | 직접 접속용 (선택) |
+| 앱 | http://localhost:8080 | HTTP API·시연 콘솔 |
+| Adminer | http://localhost:8081 | Server `mariadb`, DB·계정·비밀번호 `nextcloud` |
+| MailHog | http://localhost:8025 | 시연 이메일 수신 확인 |
 
-기동 확인: `curl http://localhost:8080/actuator/health` → `{"status":"UP"}`
-
-Flyway가 V1~V13을 순차 적용해 테이블 15개를 생성한다.
-
-### 테스트 계정
-
-기본 프로필 `demo`에서 자동 생성된다 (`users` 테이블이 비어 있을 때만).
+기본 `demo` 프로필에서 사용자 테이블이 비어 있으면 다음 계정을 생성합니다.
 
 | 계정 | 비밀번호 | 역할 |
 |---|---|---|
@@ -68,230 +41,159 @@ Flyway가 V1~V13을 순차 적용해 테이블 15개를 생성한다.
 | bob | bob123 | USER |
 | admin | admin123 | ADMIN |
 
-### 정지 · 초기화
+운영 시 `SPRING_PROFILES_ACTIVE=prod`를 지정하면 데모 계정은 생성되지 않습니다.
+자세한 설치 절차는 [INSTALL.md](INSTALL.md)에 있습니다.
 
-```bash
-docker compose down       # 컨테이너만 정지 (데이터 유지)
-docker compose down -v    # DB·저장소 볼륨까지 삭제 (완전 초기화)
+```powershell
+curl.exe http://localhost:8080/actuator/health
+docker compose down
 ```
 
----
+헬스 응답은 `{"status":"UP"}`입니다. `docker compose down`은 컨테이너를 정지하며 DB·저장소 볼륨은 유지합니다.
 
-## 시연 — 브라우저 콘솔
+## 처리 흐름
 
-<http://localhost:8080> 접속. 로그인 후 전 기능을 화면에서 조작할 수 있다.
+### 5.x 민감 데이터 검사
 
-| 구역 | 가능한 작업 |
+1. 최초 업로드 또는 수정본 업로드로 버전을 저장합니다.
+2. 버전 저장 후 FULL 검사 작업을 적재합니다.
+3. `DlpScanWorker`가 본문을 확보하여 규칙 기반 검사를 수행합니다. 추출 텍스트는 diff와 공유합니다.
+4. 수정 버전의 diff가 완료되면 추가된 줄이 있는 경우 DELTA 검사도 적재합니다.
+5. 판정, 점수, 탐지 위치, 마스킹된 탐지값을 API로 조회합니다.
+
+기본 규칙은 주민번호·카드·계좌·휴대전화·이메일 5종입니다. 체크섬과 주변 문맥 조건은 규칙에 따라 적용됩니다.
+판정은 기본 임계값 50과 점수 합계를 비교하며, 패턴 존재 여부와 임계값 초과 여부는 다를 수 있습니다.
+
+| 구분 | 값과 의미 |
 |---|---|
-| 파일 업로드 | 문서 업로드 |
-| 문서 목록 | 내 문서 조회 |
-| 선택한 문서 | 수정본 업로드, 시점 조회, diff 비교·재시도, 상태 변경, 승인 요청·승인·반려·취소·번복, 구독 |
-| 알림 | 내 알림, 읽음 처리, 아웃박스 확인 |
-| 보존 정책 | 정책 생성·적용·비활성화 (ADMIN) |
+| 검사 범위 | `FULL`: 버전 전체 판정용, `DELTA`: 추가 줄의 보조 검사 |
+| 작업 상태 | `PENDING → PROCESSING → COMPLETED / FAILED` |
+| 판정 | `SENSITIVE`, `NOT_SENSITIVE`, `UNDETERMINED` |
 
-**권장 시연 순서**
+클라이언트는 FULL의 작업 상태와 판정을 함께 확인해야 합니다. 검사 대기·실패·판정 불가를 안전으로 간주하면 안 됩니다.
+활성 규칙이 없으면 현재 엔진은 `UNDETERMINED`를 반환합니다.
+FULL 워커는 기본 15초 주기로 최대 20건씩 순차 처리하므로, 현재 구조에서 즉시 판정 완료를 보장하지 않습니다.
 
-1. `alice`로 로그인 → 파일 업로드
-2. 같은 문서에 수정본 업로드 → 리비전 2 생성 확인
-3. 두 버전 선택 → **비교** → diff 결과 확인
-   - 계산은 배경 워커가 수행한다. `PENDING`/`PROCESSING`이면 잠시 후 다시 누르면 된다.
-   - `FAILED`이면 실패 사유와 함께 **재시도** 버튼이 표시된다.
-4. 상태를 **검토중**으로 변경 → **승인 요청** (승인자 `bob`)
-5. `bob`으로 로그인 → 승인 → 문서 상태가 **승인**으로 전이되는지 확인
-6. 알림 구역에서 통지 확인, MailHog(<http://localhost:8025>)에서 메일 확인
+### 9.x 버전과 승인
 
-> 활동 이력 전체(행위 종류·대상 버전 포함)는 API로 확인할 수 있다.
-> ```bash
-> curl -b cookie.txt "http://localhost:8080/api/documents/{fileId}/activity"
-> ```
+업로드는 새 경로이면 최초 버전을, 같은 소유자·경로이면 수정 버전을 생성합니다.
+수정 시 문서 행 잠금 아래 리비전을 증가시키고 변경 이력과 이해관계자 알림을 기록합니다.
+승인 요청은 현재 버전을 대상으로 고정되며, 열린 요청이 있는 동안 새 버전 업로드를 차단합니다.
+승인 후 수정본을 올리면 수정본 초안으로 전환됩니다.
 
----
-
-## DB로 확인하기 (Adminer)
-
-<http://localhost:8081> → System `MySQL/MariaDB`, Server `mariadb`,
-계정 `nextcloud` / `nextcloud`, Database `nextcloud`.
-
-| 테이블 | 확인 포인트 |
-|---|---|
-| `files_versions` | 같은 `file_id`에 `revision_no` 1, 2… 단조 증가 |
-| `version_diffs` | `status` 전이(PENDING → COMPLETED), `diff_method=myers`, 추가·삭제 줄 수 |
-| `activity` | 변경 이력. `subjectparams`에 사유·versionId가 JSON으로 기록 |
-| `files_versions.metadata` | `JSON_SET`으로 기록된 `{"author":…,"reason":…}` |
-| `approval_requests` | `target_version_id` — 승인 대상 버전이 고정되어 있음 |
-| `notifications` | `dedup_key` — 사건 식별자 기반 중복 방지 키 |
-
----
+시연 순서: Alice 업로드 → 수정본 업로드 → 인접 버전 비교 → 검토중 전환 → Bob에게 승인 요청 → Bob 승인 → 알림 확인.
+diff와 DLP 검사는 비동기이므로 각각의 작업 상태를 조회하여 완료를 확인합니다.
 
 ## 주요 API
 
-모든 `/api/**`는 로그인이 필요하다. 작성자·행위자는 요청 값이 아니라 **세션 신원**으로 결정된다.
+`/api/auth/**`를 제외한 아래 업무 API는 로그인이 필요합니다. 행위자는 세션 신원으로 결정합니다.
+문서 조회는 소유자·구독자·관리자, 변경은 해당 서비스의 소유권·승인 자격 검사에 따릅니다.
 
-### 버전 (9.1 · 9.2 · 9.3 · 9.4 · 9.5)
+### 민감 데이터 판별
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| POST | `/api/documents/upload` | 업로드. 같은 경로면 새 버전, 새 경로면 새 문서 |
-| POST | `/api/documents/{fileId}/versions` | 수정 → 새 버전 |
-| GET | `/api/documents/{fileId}/versions` | 시점 기준 버전 목록 |
-| GET | `/api/documents/{fileId}/versions/{versionId}/content` | 특정 버전 파일 다운로드 |
+| GET | `/api/documents/{fileId}/versions/{versionId}/dlp?scope=FULL` | 버전 검사 상태·판정·탐지 항목 |
+| GET | `/api/documents/{fileId}/dlp` | 문서의 버전별 검사 목록 |
+| POST | `/api/documents/{fileId}/versions/{versionId}/dlp/rescan?scope=FULL` | 소유자의 재검사 요청 |
+| GET | `/api/dlp/rules` | 규칙 요약·임계값 조회, ADMIN |
+| POST | `/api/dlp/rules/reload` | DB 규칙 재적재, ADMIN |
+
+`scope`는 `FULL` 또는 `DELTA`를 사용합니다. 규칙 생성·수정·삭제 API는 제공하지 않습니다.
+Web 관리 기능과 DB 변경 또는 별도 API의 연동 계약이 필요합니다.
+재검사는 같은 버전·범위의 검사 행을 초기화하므로 실행마다 별도 이력을 누적하는 방식은 아닙니다.
+
+### 버전·이력·상태
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| POST | `/api/documents/upload` | `file`, `folder`, 선택 `reason`으로 업로드 |
+| POST | `/api/documents/{fileId}/versions` | 수정본 `file`, 선택 `reason` 업로드 |
+| GET | `/api/documents/{fileId}/versions` | `targetTimestamp`, `limit`, `offset` 기반 조회 |
+| GET | `/api/documents/{fileId}/versions/{versionId}/content` | 버전 파일 다운로드 |
 | GET | `/api/documents/{fileId}/activity` | 변경 이력 |
-| GET | `/api/documents/{fileId}/diff` | 두 버전 차이 (상태 포함) |
-| POST | `/api/documents/{fileId}/diff/retry` | 실패한 diff 재계산 |
+| GET | `/api/documents/{fileId}/diff` | `fromVersionId`, `toVersionId`의 기존 비교 작업 조회 |
+| POST | `/api/documents/{fileId}/diff/retry` | 실패한 기존 비교 작업 재시도 |
+| GET · POST | `/api/documents/{fileId}/status` | 상태 조회·전이 |
+| GET | `/api/documents/{fileId}/status-history` | 상태 이력 |
 
-### 상태 (9.6)
+### 승인·알림·보존
 
-| 메서드 | 경로 |
-|---|---|
-| GET · POST | `/api/documents/{fileId}/status` |
-| GET | `/api/documents/{fileId}/status-history` |
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/api/documents/{fileId}/approval` | 승인 요청과 이력 |
+| POST | `/api/documents/{fileId}/approval/request` | `approvers`, `mode=ALL/MAJORITY/SEQUENTIAL`, 선택 `comment` |
+| POST | `/api/documents/{fileId}/approval/{approve\|reject\|cancel\|retract}` | 승인·반려·취소·번복 |
+| GET · POST | `/api/approval/delegation` | 위임 조회·설정 |
+| POST | `/api/approval/delegation/revoke` | 위임 해지 |
+| GET | `/api/notifications` | 내 알림 |
+| POST | `/api/notifications/{id}/read` | 읽음 처리 |
+| GET | `/api/notifications/outbox` | 발송 작업 조회, ADMIN |
+| POST | `/api/documents/{fileId}/subscribe` · `/unsubscribe` | 구독 관리 |
+| GET · POST | `/api/retention/policies` | 정책 조회·생성, ADMIN |
+| POST | `/api/retention/policies/{id}` · `/{id}/deactivate` · `/{id}/apply` | 정책 수정·비활성화·적용, ADMIN |
 
-### 승인 (9.7)
+## 테스트와 평가
 
-| 메서드 | 경로 |
-|---|---|
-| GET | `/api/documents/{fileId}/approval` |
-| POST | `/api/documents/{fileId}/approval/request` |
-| POST | `/api/documents/{fileId}/approval/{approve\|reject\|cancel\|retract}` |
-| GET · POST | `/api/approval/delegation` , `/api/approval/delegation/revoke` |
-
-### 알림 (9.9)
-
-| 메서드 | 경로 |
-|---|---|
-| GET | `/api/notifications` |
-| POST | `/api/notifications/{id}/read` |
-| GET | `/api/notifications/outbox` (ADMIN) |
-| POST | `/api/documents/{fileId}/subscribe` · `/unsubscribe` |
-
-### 보존 정책 (9.10) — ADMIN 전용
-
-| 메서드 | 경로 |
-|---|---|
-| GET · POST | `/api/retention/policies` |
-| POST | `/api/retention/policies/{id}` · `/deactivate` · `/apply` |
-
----
-
-## 설계 요점
-
-**계층 분리** — `web`(HTTP 창구) → `service`(업무 규칙) → `mapper`(SQL). 이름 끝 단어가 곧 계층이다.
-
-**잠금 순서 고정** — 모든 변경 경로에서 `documents` → `approval_requests` 순으로 획득해 교착을 방지한다.
-
-**이중 인가** — 경로 단위(Spring Security, 기본 거부) + 객체 단위(`DocumentAccessPolicy`).
-로그인만으로 타인의 문서에 접근할 수 없다.
-
-**부수효과 분리** — diff 계산·알림 발송은 `@TransactionalEventListener(AFTER_COMMIT)`와
-배경 워커로 분리했다. 실패해도 본 작업(버전 생성)은 확정된 채로 남는다.
-
-**승인 대상 버전 고정 (V11)** — 승인 요청 시점의 버전을 기록하고, 열린 요청이 있으면
-새 버전 업로드를 차단한다. 결재자가 본 문서와 승인된 문서가 달라지지 않는다.
-
-**diff 작업 상태 기계 (V12)** — PENDING → PROCESSING → COMPLETED / FAILED.
-최대 3회 재시도, 죽은 워커 회수, 수동 재시도를 지원한다.
-
-### 배경 워커
-
-| 워커 | 하는 일 |
-|---|---|
-| `DiffJobWorker` | diff 계산 처리 |
-| `NotificationOutboxWorker` | 알림 발송 (아웃박스 패턴) |
-| `RetentionCleanupWorker` | 보존 정책 적용 |
-| `DelegationCleanupWorker` | 만료 위임 해제 |
-
-테스트에서는 `docversion.scheduling.enabled=false`로 일괄 비활성화된다.
-
----
-
-## 테스트
-
-### JUnit (25건)
+Java 21과 Maven이 필요합니다. 아래 명령은 `docversion/` 기준입니다.
 
 ```bash
+mvn -pl dlp-core test
 mvn test
 ```
 
-Docker 필요 — Testcontainers가 `mariadb:10.11`을 기동한다.
+첫 명령은 Docker 없이 탐지 엔진을 시험합니다. 전체 `mvn test`는 MariaDB Testcontainers를 사용하므로 Docker가 필요합니다.
+테스트에서는 `docversion.scheduling.enabled=false`로 자동 스케줄링을 끄고 필요한 워커를 직접 호출합니다.
+Docker API 호환 설정은 `docversion-app/src/test/resources/docker-java.properties`에 있습니다.
 
-| 클래스 | 건수 | 검증 대상 |
-|---|---|---|
-| `ApprovalVersionIntegrityTest` | 9 | 승인 대상 버전 고정, 업로드 차단, 예외 분류 |
-| `GlobalExceptionHandlerTest` | 5 | 예외 → HTTP 상태 매핑 (컨테이너 불필요) |
-| `DiffJobStateTest` | 4 | 재시도, FAILED 확정, 점유 원자성 |
-| `NotificationDedupTest` | 4 | 사건 식별자 기반 중복 제거 |
-| `VersionLifecycleParityTest` | 2 | 리비전 증가, diff 적재, 정렬 |
-| `VersionUpdatedMimeTest` | 1 | 이전 버전 MIME 전달 |
-
-> **Docker Engine 29 이상 사용 시**: Testcontainers 1.x는 API 버전 협상에 실패한다.
-> `src/test/resources/docker-java.properties`의 `api.version=1.44`가 이를 우회한다.
-> 이 파일을 지우면 테스트가 기동하지 않는다.
-
-### 통합 테스트 (76건)
-
-서버가 기동된 상태에서 실행한다. 실제 HTTP 호출로 인증·인가까지 검증한다.
+서버 기동 후:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\docversion_test.ps1
+cd dlp-eval
+powershell -ExecutionPolicy Bypass -File .\measure-dlp.ps1
 ```
 
-절 0~14로 구성되며 동시 판정 직렬화, 경로 경합, 접근 제어, 예외 분류, diff 상태 기계를 포함한다.
+2026-09-05 검토에서 기존 Docker 비의존 테스트 74건이 통과했습니다.
+엔진 47건은 규칙·검증기·마스킹·겹침·측정 결함 회귀를, 앱 27건은 추출 상한·MIME·diff 상한·예외 매핑·LIKE 이스케이프를 확인했습니다.
+해당 검토에서 DB·HTTP 전체 통합 시험과 부하 시험은 재실행하지 않았습니다.
 
----
+[DLP 평가 문서](dlp-eval/README.md)에는 2026-08-31 측정과 V18 수정 근거가 기록되어 있습니다.
+현재 문서 25종·파일 63개를 제공하며, 최신 규칙에 대한 전체 평가 지표는 실제 측정 실행 결과로 확인해야 합니다.
 
-## 스키마 (Flyway V1~V13)
+## Flyway 마이그레이션
 
 | 버전 | 내용 |
 |---|---|
-| V1 | `documents`, `files_versions`, `version_diffs`, `activity` |
-| V2 | `document_status_history`, `documents.status` |
-| V3 | `approval_requests`, `approval_activity` |
-| V4 | `notifications`, `notification_outbox`, `file_subscriptions` |
-| V5 | `retention_policies` |
-| V6 | `users`, `user_roles` |
-| V7 | `users.email` |
-| V8 | `approval_request_approvers` (다중 승인자) |
-| V9 | `approval_delegations` (위임) |
-| V10 | 문서 경로 유일 제약 (동시 생성 경합 차단) |
-| V11 | `approval_requests.target_version_id` (승인 대상 고정) |
-| V12 | `version_diffs` 상태·재시도 컬럼 |
-| V13 | 알림 중복 키 의미 변경 (사건 식별자 기반) |
+| V1 | 문서·버전·diff·활동 이력 |
+| V2~V3 | 문서 상태와 승인 요청 |
+| V4~V5 | 알림·아웃박스·구독·보존 정책 |
+| V6~V7 | 사용자·역할·이메일 |
+| V8~V9 | 다중 승인자와 위임 |
+| V10~V13 | 경로 유일 제약, 승인 대상 버전, diff 작업 상태, 알림 중복 키 |
+| V14 | DLP 규칙·키워드 스키마와 패턴 5종 |
+| V15 | DLP 검사·탐지 항목과 버전 텍스트 캐시 메타데이터 |
+| V16~V17 | DLP 점수 상한 해제와 계좌 규칙 수정 |
+| V18 | 측정 결과를 반영한 계좌 오탐 감소와 Amex 카드 패턴 추가 |
 
-**적용된 마이그레이션 파일은 수정하지 않는다.** Flyway가 체크섬을 검사해 기동을 거부한다.
-변경이 필요하면 새 번호를 추가한다.
+이미 적용한 마이그레이션 파일을 수정하지 않고 새 번호로 변경을 추가합니다.
+기존 버전의 `text_status=PENDING`만으로 DLP 작업이 자동 생성되지는 않으므로 기존 자료에 대한 별도 백필이 필요합니다.
 
----
+## 알려진 제약
 
-## C++ → Spring 매핑
-
-| C++ | Java |
+| 영역 | 남은 문제 |
 |---|---|
-| `DocumentVersionWorkflowAPI` (버전 메서드) | `DocumentVersionService` (오케스트레이터) |
-| `TransactionGuard` (RAII) | `VersionWriteService`의 `@Transactional` |
-| `DatabaseConnection` (MySQL C API) | MyBatis 매퍼 + HikariCP |
-| `FileStorage` | `StorageService` + `LocalFileStorage` |
-| `DiffService` / `DocumentTextExtractor` | 동명 클래스 / 인터페이스 + Tika 구현 |
-| `generateUUID` / `escapeJsonString`, `parseJson` | `UuidGenerator` / `VersionMetadata` (Jackson) |
-| 후처리 `notifyStakeholders`, diff 캐시 | `@TransactionalEventListener(AFTER_COMMIT)` + 배경 워커 |
+| 검사 완결성 | 앞 500만 자만 검사하거나 일부 텍스트만 추출한 상태에서도 비민감 확정 가능 |
+| 작업 적재 | 버전 커밋 후 DLP·diff 적재 실패 시 작업 자체가 누락되고 자동 복구되지 않을 수 있음 |
+| 검사 결과 정합성 | 탐지 항목과 판정 저장의 트랜잭션 누락, 실행 중 재검사·stale 회수 경합 |
+| 실시간성 | 15초 주기 순차 후처리이며 판정 완료 지연 상한 미검증 |
+| 버전 비교 | 인접 버전만 자동 적재. 비연속 버전쌍은 조회·retry만으로 작업 생성 불가 |
+| 시점 조회 | 이전 결과가 없으면 미래 버전을 반환하는 fallback 존재 |
+| 승인 위임 | 대리인의 문서 열람 권한과 본인 승인자 겸임 시 대리 판정 처리 보완 필요 |
+| 보존 | 폴더 구분자 경계, 중첩 정책 충돌, 수정값 검증 보완 필요 |
+| 지원 형식 | HWP 텍스트 추출 미지원. 추출 불가 시 DLP는 판정 불가, diff는 해시 비교로 처리 |
+| 파일 처리 | 기본 업로드 20MB, 요청 25MB. 전량 메모리 적재로 대용량·동시 접근 검증 필요 |
+| 운영 | 고아 파일 정리, 다중 인스턴스 정합성, 세션 기반 웹 사용의 CSRF 보호 보완 필요 |
 
-업무 규칙의 정본은 C++ 단계에 있다. Java로 옮기는 것은 트랜잭션·이벤트 같은 인프라 계층이며,
-순수 업무 규칙에 결함이 발견되면 C++ 단계에서 먼저 수정한다.
-
----
-
-## 알려진 제약 · 잔여 과제
-
-| 우선순위 | 항목 |
-|---|---|
-| 높음 | 보존 정책 폴더 범위가 `LIKE` 접두 검색이라 `/a`로 `/abc`까지 포함한다 |
-| 높음 | 보존 정책 우선순위 해석기(FILE > FOLDER > USER > GLOBAL) 미구현 |
-| 중간 | 파일 전송이 전량 메모리 적재 방식 (`InputStream` 기반 전환 필요) |
-| 중간 | 다중 인스턴스 배치 락 (ShedLock 또는 `SKIP LOCKED`) |
-| 중간 | 고아 파일 정리 절차 부재 |
-| 중간 | CI 미구축 (GitHub Actions) |
-| 낮음 | Testcontainers 2.x 상향 시 `docker-java.properties` 제거 가능 |
-| 낮음 | HWP 텍스트 추출 미지원 — 국제 라이브러리 부재로 해시 비교로 처리 |
-
-**CSRF는 비활성화 상태다.** 클라이언트 에이전트가 호출하는 백엔드 API이므로 브라우저 쿠키
-자동 전송에 기인하는 CSRF가 이 사용 형태에 해당하지 않는다는 판단이다. 세션 기반 웹 UI를
-정식 제공하게 되면 재검토 대상이다.
+이 문서는 현재 구현 상태를 설명하며 전체 명세의 인수 완료를 선언하지 않습니다.
+문서 갱신: 2026-09-06.

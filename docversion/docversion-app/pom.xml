@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.docversion</groupId>
+        <artifactId>docversion</artifactId>
+        <version>0.1.0-alpha</version>
+    </parent>
+
+    <artifactId>docversion-app</artifactId>
+    <name>docversion-app</name>
+    <description>RD-SRS-9.x 문서 형상관리 구현체 + Spring Boot 배선. dlp-core(5.x)를 조립한다.</description>
+
+    <dependencies>
+        <!-- 08/17 - RD-SRS-5.x 탐지 엔진. 의존은 이 방향으로만 존재한다.
+             dlp-core는 이 모듈을 참조하지 않으며 DB 접근 계층도 알지 못한다. -->
+        <dependency>
+            <groupId>com.docversion</groupId>
+            <artifactId>dlp-core</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- 알림 이메일 실발송 (RD-SRS-9.9 외부 채널) — SMTP(JavaMailSender) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
+
+        <!-- 텍스트 추출 (RD-SRS-9.4) — PDF·Word·Excel 등 바이너리 문서의 텍스트 diff.
+             tika-core: 추출 프레임워크 / parsers-standard-package: 표준 형식 해석기 묶음.
+             HWP는 미지원(지원 예정 — hwplib 등 전용 구현체 추가 자리는 seam으로 확보됨). -->
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-core</artifactId>
+            <version>${tika.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-parsers-standard-package</artifactId>
+            <version>${tika.version}</version>
+        </dependency>
+
+        <!-- 인증·인가 (RD 후속: 세션 기반 로그인) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+
+        <!-- 헬스체크 엔드포인트(/actuator/health) — compose/데모에서 기동 확인용 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- 영속성: MyBatis (코어 SQL 직역) -->
+        <dependency>
+            <groupId>org.mybatis.spring.boot</groupId>
+            <artifactId>mybatis-spring-boot-starter</artifactId>
+            <version>${mybatis-spring-boot.version}</version>
+        </dependency>
+
+        <!-- MariaDB 드라이버 (확정 전제) -->
+        <dependency>
+            <groupId>org.mariadb.jdbc</groupId>
+            <artifactId>mariadb-java-client</artifactId>
+        </dependency>
+
+        <!-- 스키마 마이그레이션 -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+        </dependency>
+
+        <!-- JSON 메타데이터 처리 (C++ escapeJsonString/parseJson 대체) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <!-- 테스트: Testcontainers + 실제 MariaDB (H2 대신 실 DB로 parity 검증) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mybatis.spring.boot</groupId>
+            <artifactId>mybatis-spring-boot-starter-test</artifactId>
+            <version>${mybatis-spring-boot.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>mariadb</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

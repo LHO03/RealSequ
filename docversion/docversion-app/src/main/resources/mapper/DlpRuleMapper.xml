@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  DLP 탐지 규칙 조회. (RD-SRS-5.4)
+  시동 시 1회만 호출되며 결과는 컴파일하여 메모리에 보관한다.
+-->
+<mapper namespace="com.docversion.mapper.DlpRuleMapper">
+
+    <select id="selectActivePatterns" resultType="map">
+        SELECT pattern_name     AS patternName,
+               display_name     AS displayName,
+               regex,
+               severity,
+               score,
+               score_verified   AS scoreVerified,
+               validator,
+               context_regex    AS contextRegex,
+               context_window   AS contextWindow,
+               max_hits_scored  AS maxHitsScored,
+               mask_keep_prefix AS maskKeepPrefix,
+               mask_keep_suffix AS maskKeepSuffix
+          FROM dlp_patterns
+         WHERE is_active = 1
+         ORDER BY pattern_name
+    </select>
+
+</mapper>

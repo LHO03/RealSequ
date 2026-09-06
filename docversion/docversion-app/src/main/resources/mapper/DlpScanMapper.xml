@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  DLP 검사 작업. (RD-SRS-5.1, 5.2)
+  상태 기계는 version_diffs(V12)와 동일한 방식을 따른다.
+-->
+<mapper namespace="com.docversion.mapper.DlpScanMapper">
+
+    <!--
+      작업 적재. UNIQUE(version_id, scope) 덕분에 중복 적재가 차단된다.
+      INSERT IGNORE로 예외 대신 무시 처리한다. 사건이 두 번 발행되더라도
+      작업은 한 건만 생긴다.
+    -->
+    <insert id="insertPending">
+        INSERT IGNORE INTO dlp_scans
+            (file_id, version_id, scope, status, attempts, created_at, updated_at)
+        VALUES
+            (#{fileId}, #{versionId}, #{scope}, 'PENDING', 0, #{now}, #{now})
+    </insert>
+
+    <select id="selectPending" resultType="map">
+        SELECT id,
+               file_id    AS fileId,
+               version_id AS versionId,
+               scope,
+               attempts
+          FROM dlp_scans
+         WHERE status = 'PENDING'
+         ORDER BY created_at ASC, id ASC
+         LIMIT #{limit}
+    </select>
+
+    <!--
+      원자적 점유. status='PENDING' 조건이 곧 잠금 역할을 한다.
+      여러 워커가 동시에 실행해도 UPDATE에 성공한 하나만 1을 돌려받는다.
+    -->
+    <update id="claim">
+        UPDATE dlp_scans
+           SET status = 'PROCESSING',
+               attempts = attempts + 1,
+               updated_at = #{now}
+         WHERE id = #{id} AND status = 'PENDING'
+    </update>
+
+    <!--
+      정체 작업 회수. 시도 횟수를 함께 올리는 것이 중요하다.
+      올리지 않으면 점유 직후 반복 사망하는 작업이 실패로 확정되지 못하고
+      영원히 순환한다.
+    -->
+    <update id="requeueStale">
+        UPDATE dlp_scans
+           SET status = 'PENDING',
+               attempts = attempts + 1,
+               updated_at = #{now}
+         WHERE status = 'PROCESSING' AND updated_at &lt; #{threshold}
+    </update>
+
+    <update id="markCompleted">
+        UPDATE dlp_scans
+           SET status        = 'COMPLETED',
+               verdict       = #{verdict},
+               total_score   = #{totalScore},
+               threshold     = #{threshold},
+               max_severity  = #{maxSeverity},
+               finding_count = #{findingCount},
+               method        = #{method},
+               note          = #{note},
+               last_error    = NULL,
+               updated_at    = #{now}
+         WHERE id = #{id}
+    </update>
+
+    <update id="requeue">
+        UPDATE dlp_scans
+           SET status = 'PENDING',
+               last_error = #{error},
+               updated_at = #{now}
+         WHERE id = #{id}
+    </update>
+
+    <update id="markFailed">
+        UPDATE dlp_scans
+           SET status = 'FAILED',
+               last_error = #{error},
+               updated_at = #{now}
+         WHERE id = #{id}
+    </update>
+
+    <!--
+      탐지 항목 일괄 저장. 원문(matched)은 저장하지 않는다.
+      masked_value와 위치만 남기며, 이것이 탐지 결과 자체가
+      2차 유출 경로가 되지 않게 하는 장치다.
+    -->
+    <insert id="insertFindings">
+        INSERT INTO dlp_findings
+            (scan_id, pattern_name, severity, score, verified,
+             match_offset, match_length, masked_value, scored)
+        VALUES
+        <foreach collection="findings" item="f" separator=",">
+            (#{scanId}, #{f.patternName}, #{f.severity}, #{f.score}, #{f.verified},
+             #{f.matchOffset}, #{f.matchLength}, #{f.maskedValue}, #{f.scored})
+        </foreach>
+    </insert>
+
+    <delete id="deleteFindings">
+        DELETE FROM dlp_findings WHERE scan_id = #{scanId}
+    </delete>
+
+    <select id="findByVersionAndScope" resultType="map">
+        SELECT id,
+               file_id       AS fileId,
+               version_id    AS versionId,
+               scope,
+               status,
+               verdict,
+               total_score   AS totalScore,
+               threshold,
+               max_severity  AS maxSeverity,
+               finding_count AS findingCount,
+               method,
+               note,
+               attempts,
+               last_error    AS lastError,
+               created_at    AS createdAt,
+               updated_at    AS updatedAt
+          FROM dlp_scans
+         WHERE version_id = #{versionId} AND scope = #{scope}
+         LIMIT 1
+    </select>
+
+    <select id="findFindings" resultType="map">
+        SELECT pattern_name AS patternName,
+               severity,
+               score,
+               verified,
+               match_offset AS matchOffset,
+               match_length AS matchLength,
+               masked_value AS maskedValue,
+               scored
+          FROM dlp_findings
+         WHERE scan_id = #{scanId}
+         ORDER BY match_offset ASC, id ASC
+    </select>
+
+    <select id="findByFile" resultType="map">
+        SELECT id,
+               version_id    AS versionId,
+               scope,
+               status,
+               verdict,
+               total_score   AS totalScore,
+               max_severity  AS maxSeverity,
+               finding_count AS findingCount,
+               created_at    AS createdAt,
+               updated_at    AS updatedAt
+          FROM dlp_scans
+         WHERE file_id = #{fileId}
+         ORDER BY created_at DESC, id DESC
+    </select>
+
+    <!--
+      재검사. 새 행을 만들지 않고 기존 행을 되돌린다.
+      UNIQUE(version_id, scope)가 있으므로 새 행은 만들 수 없다.
+      시도 횟수를 0으로 되돌려 한도를 다시 부여한다.
+    -->
+    <update id="resetToPending">
+        UPDATE dlp_scans
+           SET status = 'PENDING',
+               attempts = 0,
+               verdict = NULL,
+               total_score = NULL,
+               max_severity = NULL,
+               finding_count = 0,
+               note = NULL,
+               last_error = NULL,
+               updated_at = #{now}
+         WHERE version_id = #{versionId} AND scope = #{scope}
+    </update>
+
+</mapper>

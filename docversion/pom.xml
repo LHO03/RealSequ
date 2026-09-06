@@ -4,133 +4,149 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <parent>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.3.5</version>
-        <relativePath/>
-    </parent>
+    <!--
+      08/17 - 멀티모듈 전환 (RD-SRS-5.x 결합 준비)
+      기존 단일 모듈(docversion-core)을 부모 + 2개 모듈로 분리한다.
 
+        docversion (이 파일, packaging=pom)
+        ├── dlp-core        : RD-SRS-5.x 탐지 엔진. 순수 자바, 프레임워크 의존 없음
+        └── docversion-app  : RD-SRS-9.x 구현체 + Spring Boot 배선. dlp-core에 의존
+
+      의존 방향은 단방향이다. dlp-core는 docversion-app을 참조하지 않으며,
+      문서/버전/승인 같은 9.x 개념과 데이터베이스 접근 계층을 알지 못한다.
+      이 규칙은 Maven 모듈 경계로 강제되므로 코드 리뷰에 의존하지 않는다.
+
+      부모를 spring-boot-starter-parent로 두지 않고 별도 pom으로 세운 이유:
+      dlp-core가 Spring 의존성 관리를 상속받으면 "순수 자바" 규칙이 흐려진다.
+      Spring BOM은 docversion-app에서만 import한다.
+    -->
     <groupId>com.docversion</groupId>
-    <artifactId>docversion-core</artifactId>
+    <artifactId>docversion</artifactId>
     <version>0.1.0-alpha</version>
-    <name>docversion-core</name>
-    <description>DocumentVersionWorkflow - 버전 생명주기 슬라이스 (C++ 프로토타입 → Spring Boot 전환)</description>
+    <packaging>pom</packaging>
+    <name>docversion</name>
+    <description>문서 중앙화 서버 모듈 (RD-SRS-9.x 형상관리 + RD-SRS-5.x DLP)</description>
+
+    <modules>
+        <module>dlp-core</module>
+        <module>docversion-app</module>
+    </modules>
 
     <properties>
         <java.version>21</java.version>
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <spring-boot.version>3.3.5</spring-boot.version>
         <mybatis-spring-boot.version>3.0.3</mybatis-spring-boot.version>
+        <tika.version>2.9.2</tika.version>
+        <testcontainers.version>1.20.3</testcontainers.version>
+        <surefire.version>3.5.4</surefire.version>
+        <maven-compiler.version>3.13.0</maven-compiler.version>
     </properties>
-
-    <dependencies>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
-        </dependency>
-
-        <!-- 알림 이메일 실발송 (RD-SRS-9.9 외부 채널) — SMTP(JavaMailSender) -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-mail</artifactId>
-        </dependency>
-
-        <!-- 텍스트 추출 (RD-SRS-9.4) — PDF·Word·Excel 등 바이너리 문서의 텍스트 diff.
-             tika-core: 추출 프레임워크 / parsers-standard-package: 표준 형식 해석기 묶음.
-             HWP는 미지원(지원 예정 — hwplib 등 전용 구현체 추가 자리는 seam으로 확보됨). -->
-        <dependency>
-            <groupId>org.apache.tika</groupId>
-            <artifactId>tika-core</artifactId>
-            <version>2.9.2</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.tika</groupId>
-            <artifactId>tika-parsers-standard-package</artifactId>
-            <version>2.9.2</version>
-        </dependency>
-
-        <!-- 인증·인가 (RD 후속: 세션 기반 로그인) -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-security</artifactId>
-        </dependency>
-
-        <!-- 헬스체크 엔드포인트(/actuator/health) — compose/데모에서 기동 확인용 -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
-
-        <!-- 영속성: MyBatis (코어 SQL 직역) -->
-        <dependency>
-            <groupId>org.mybatis.spring.boot</groupId>
-            <artifactId>mybatis-spring-boot-starter</artifactId>
-            <version>${mybatis-spring-boot.version}</version>
-        </dependency>
-
-        <!-- MariaDB 드라이버 (확정 전제) -->
-        <dependency>
-            <groupId>org.mariadb.jdbc</groupId>
-            <artifactId>mariadb-java-client</artifactId>
-        </dependency>
-
-        <!-- 스키마 마이그레이션 -->
-        <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-mysql</artifactId>
-        </dependency>
-
-        <!-- JSON 메타데이터 처리 (C++ escapeJsonString/parseJson 대체) -->
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-        </dependency>
-
-        <!-- 테스트: Testcontainers + 실제 MariaDB (H2 대신 실 DB로 parity 검증) -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.mybatis.spring.boot</groupId>
-            <artifactId>mybatis-spring-boot-starter-test</artifactId>
-            <version>${mybatis-spring-boot.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>mariadb</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
 
     <dependencyManagement>
         <dependencies>
+            <!-- Spring Boot BOM. 부모 상속 대신 import로 가져와 dlp-core에는 영향이 없게 한다. -->
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>org.testcontainers</groupId>
                 <artifactId>testcontainers-bom</artifactId>
-                <version>1.20.3</version>
+                <version>${testcontainers.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <!-- 형제 모듈 버전 고정 -->
+            <dependency>
+                <groupId>com.docversion</groupId>
+                <artifactId>dlp-core</artifactId>
+                <version>${project.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
 
     <build>
+        <!--
+          08/19 - 모든 모듈에 적용되는 컴파일러 설정.
+
+          pluginManagement가 아니라 plugins에 두는 이유: pluginManagement는
+          "쓰게 되면 이 버전/설정으로"라는 선언일 뿐 실제로 적용되지 않는다.
+          하위 모듈이 별도 선언 없이 상속받아야 하므로 plugins에 둔다.
+        -->
         <plugins>
             <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${maven-compiler.version}</version>
+                <configuration>
+                    <!--
+                      -parameters: 메서드 파라미터 이름을 바이트코드에 기록한다.
+
+                      Spring MVC는 @RequestParam String folder 처럼 이름을 생략한
+                      파라미터를 리플렉션으로 읽어 바인딩한다. 이 플래그가 없으면
+                      이름 정보가 사라져 다음 오류로 모든 요청이 400이 된다.
+
+                        "Name for argument of type [java.lang.String] not specified,
+                         and parameter name information not available via reflection.
+                         Ensure that the compiler uses the '-parameters' flag."
+
+                      spring-boot-starter-parent를 상속할 때는 이 설정이 그 부모에
+                      들어 있어 신경 쓸 일이 없었다. 독립 부모로 바꾸면서 함께
+                      사라졌고, 업로드를 포함한 32곳의 파라미터 바인딩이 깨졌다.
+                      (repackage 실행 정의가 사라진 것과 같은 원인)
+                    -->
+                    <parameters>true</parameters>
+                    <compilerArgs>
+                        <arg>-parameters</arg>
+                    </compilerArgs>
+                </configuration>
             </plugin>
         </plugins>
+
+        <pluginManagement>
+            <plugins>
+                <!--
+                  08/18 - surefire 버전 고정.
+                  spring-boot-starter-parent를 상속할 때는 플러그인 버전이
+                  그 부모에서 관리되어 하위 모듈은 선언만 하면 됐다.
+                  독립 부모로 바꾸면서 그 관리가 사라져
+                  "'build.plugins.plugin.version' is missing" 경고가 났고,
+                  Maven 배포판마다 다른 기본 버전이 선택될 수 있었다.
+                  빌드 재현성을 위해 명시한다.
+                -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>${surefire.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                    <version>${spring-boot.version}</version>
+                    <!--
+                      08/18 - repackage 실행을 여기서 명시한다.
+                      spring-boot-starter-parent를 상속할 때는 이 실행 정의가
+                      부모에 이미 들어 있어 플러그인 선언만으로 fat jar가 만들어졌다.
+                      부모를 별도 pom으로 세우면서 그 정의가 사라졌고,
+                      pluginManagement는 버전만 관리하므로 repackage가 돌지 않아
+                      Main-Class 없는 일반 jar가 나왔다.
+                      (증상: 컨테이너 기동 시 "no main manifest attribute")
+                    -->
+                    <executions>
+                        <execution>
+                            <id>repackage</id>
+                            <goals>
+                                <goal>repackage</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+            </plugins>
+        </pluginManagement>
     </build>
 </project>
