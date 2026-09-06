@@ -77,4 +77,6 @@ desktop.ini
 
 # ── 로컬 실행 데이터 ─────────────────────────────────────────
 # docker compose 볼륨이 아닌 로컬 실행 시 생성되는 파일 저장소
-storage/
+/storage/
+/docversion/storage/
+/docversion/docversion-app/storage/
